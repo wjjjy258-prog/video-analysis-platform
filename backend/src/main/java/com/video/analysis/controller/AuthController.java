@@ -4,6 +4,7 @@ import com.video.analysis.auth.AuthService;
 import com.video.analysis.dto.auth.AuthResponse;
 import com.video.analysis.dto.auth.LoginRequest;
 import com.video.analysis.dto.auth.RegisterRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +22,8 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/auth")
 public class AuthController {
 
+    private static final int MAX_TOKEN_LENGTH = 200;
+
     private final AuthService authService;
 
     public AuthController(AuthService authService) {
@@ -33,8 +36,8 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public AuthResponse login(@Valid @RequestBody LoginRequest request) {
-        return authService.login(request);
+    public AuthResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest servletRequest) {
+        return authService.login(request, resolveClientIp(servletRequest));
     }
 
     @PostMapping("/logout")
@@ -74,8 +77,21 @@ public class AuthController {
         }
         String value = authorization.trim();
         if (value.regionMatches(true, 0, "Bearer ", 0, 7)) {
-            return value.substring(7).trim();
+            String token = value.substring(7).trim();
+            return token.length() > MAX_TOKEN_LENGTH ? null : token;
         }
-        return value;
+        return value.length() > MAX_TOKEN_LENGTH ? null : value;
+    }
+
+    private String resolveClientIp(HttpServletRequest request) {
+        String fromForward = request.getHeader("X-Forwarded-For");
+        if (fromForward != null && !fromForward.isBlank()) {
+            return fromForward.split(",")[0].trim();
+        }
+        String fromRealIp = request.getHeader("X-Real-IP");
+        if (fromRealIp != null && !fromRealIp.isBlank()) {
+            return fromRealIp.trim();
+        }
+        return request.getRemoteAddr();
     }
 }

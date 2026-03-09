@@ -164,6 +164,21 @@ const submit = async () => {
     notifyWarning(msg, { title: "参数校验" });
     return;
   }
+  if (mode.value === "register" && form.password.length < 8) {
+    const msg = "注册密码至少 8 位。";
+    setPageMessage(msg, "error");
+    notifyWarning(msg, { title: "参数校验" });
+    return;
+  }
+  if (
+    mode.value === "register" &&
+    !( /[A-Za-z]/.test(form.password) && /\d/.test(form.password))
+  ) {
+    const msg = "注册密码需包含字母和数字。";
+    setPageMessage(msg, "error");
+    notifyWarning(msg, { title: "参数校验" });
+    return;
+  }
 
   submitting.value = true;
   try {

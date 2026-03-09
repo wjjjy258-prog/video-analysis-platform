@@ -1,11 +1,13 @@
 package com.video.analysis.controller;
 
+import com.video.analysis.dto.crawler.ClearDataRequest;
 import com.video.analysis.dto.crawler.CrawlRunResponse;
 import com.video.analysis.dto.crawler.CrawlUrlRequest;
-import com.video.analysis.dto.crawler.ClearDataRequest;
 import com.video.analysis.dto.crawler.TextImportRequest;
 import com.video.analysis.service.CrawlerService;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -25,6 +27,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/crawler")
 public class CrawlerController {
+
+    private static final Logger log = LoggerFactory.getLogger(CrawlerController.class);
 
     private final CrawlerService crawlerService;
 
@@ -78,10 +82,12 @@ public class CrawlerController {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<CrawlRunResponse> handleOtherExceptions(Exception ex) {
+        // Keep detailed stack in server logs, but avoid leaking internals to clients.
+        log.error("Unexpected crawler request failure", ex);
         CrawlRunResponse response = new CrawlRunResponse();
         response.setSuccess(false);
         response.setExitCode(1);
-        response.setMessage("执行失败: " + ex.getMessage());
+        response.setMessage("执行失败，请检查输入格式后重试。");
         response.setOutput("");
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
     }

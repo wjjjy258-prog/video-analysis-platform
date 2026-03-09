@@ -1,5 +1,6 @@
-﻿server:
+server:
   port: 8080
+  server-header: ""
 
 spring:
   application:
@@ -22,7 +23,11 @@ mybatis:
 
 logging:
   level:
-    com.video.analysis.mapper: debug
+    com.video.analysis.mapper: info
+
+app:
+  security:
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
 
 crawler:
   python-command: ${SPIDER_PYTHON:python}
@@ -41,4 +46,3 @@ crawler:
     user-batch-size: 1000
     behavior-batch-size: 5000
     dedupe-query-batch-size: 2000
-

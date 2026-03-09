@@ -14,6 +14,8 @@ import java.util.Map;
 @Component
 public class AuthInterceptor implements HandlerInterceptor {
 
+    private static final int MAX_TOKEN_LENGTH = 200;
+
     private final AuthService authService;
     private final ObjectMapper objectMapper;
 
@@ -49,14 +51,19 @@ public class AuthInterceptor implements HandlerInterceptor {
         if (authorization != null) {
             String value = authorization.trim();
             if (value.regionMatches(true, 0, "Bearer ", 0, 7)) {
-                return value.substring(7).trim();
+                String token = value.substring(7).trim();
+                return token.length() > MAX_TOKEN_LENGTH ? null : token;
             }
             if (!value.isEmpty()) {
-                return value;
+                return value.length() > MAX_TOKEN_LENGTH ? null : value;
             }
         }
         String fallback = request.getHeader("X-Auth-Token");
-        return fallback == null ? null : fallback.trim();
+        if (fallback == null) {
+            return null;
+        }
+        String token = fallback.trim();
+        return token.length() > MAX_TOKEN_LENGTH ? null : token;
     }
 
     private void writeUnauthorized(HttpServletResponse response, String message) throws Exception {
