@@ -1,0 +1,14 @@
+# URL batch import template
+# Rules:
+# 1) One URL per line
+# 2) Lines starting with # are comments
+# 3) Keep only public and authorized URLs
+# 4) Do NOT put private or sensitive links
+
+# bilibili examples (placeholder, replace with your own legal URLs)
+<BILIBILI_VIDEO_URL_1>
+<BILIBILI_VIDEO_URL_2>
+
+# douyin examples (placeholder, replace with your own legal URLs)
+<DOUYIN_VIDEO_URL_1>
+<DOUYIN_VIDEO_URL_2>

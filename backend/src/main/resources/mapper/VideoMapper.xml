@@ -1,0 +1,346 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.video.analysis.mapper.VideoMapper">
+
+    <select id="selectHotVideos" resultType="com.video.analysis.dto.HotVideoVO">
+        SELECT id,
+               title,
+               author,
+               COALESCE(source_platform, 'unknown') AS source_platform,
+               source_url,
+               import_type,
+               source_file,
+               data_quality_score,
+               category,
+               play_count,
+               like_count,
+               comment_count,
+               publish_time,
+               import_time
+        FROM video
+        WHERE tenant_user_id = #{tenantUserId}
+        <if test="platform != null and platform != ''">
+            AND COALESCE(source_platform, 'unknown') = #{platform}
+        </if>
+        ORDER BY play_count DESC, like_count DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectCategoryStats" resultType="com.video.analysis.dto.CategoryStatVO">
+        SELECT category,
+               COUNT(*) AS video_count,
+               COALESCE(SUM(play_count), 0) AS total_play,
+               COALESCE(SUM(like_count), 0) AS total_like,
+               COALESCE(SUM(comment_count), 0) AS total_comment
+        FROM video
+        WHERE tenant_user_id = #{tenantUserId}
+        <if test="platform != null and platform != ''">
+            AND COALESCE(source_platform, 'unknown') = #{platform}
+        </if>
+        GROUP BY category
+        ORDER BY total_play DESC
+    </select>
+
+    <select id="selectTrend" resultType="com.video.analysis.dto.TrendPointVO">
+        SELECT vs.stat_date,
+               COALESCE(SUM(vs.daily_play), 0) AS daily_play,
+               COALESCE(SUM(vs.daily_like), 0) AS daily_like,
+               COALESCE(SUM(vs.daily_comment), 0) AS daily_comment
+        FROM video_statistics vs
+        JOIN video v ON vs.video_id = v.id
+        WHERE vs.tenant_user_id = #{tenantUserId}
+          AND v.tenant_user_id = #{tenantUserId}
+          AND vs.stat_date >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)
+        <if test="platform != null and platform != ''">
+            AND COALESCE(v.source_platform, 'unknown') = #{platform}
+        </if>
+        GROUP BY vs.stat_date
+        ORDER BY vs.stat_date ASC
+    </select>
+
+    <select id="selectCategoryEngagement" resultType="com.video.analysis.dto.CategoryEngagementVO">
+        SELECT category,
+               COUNT(*) AS video_count,
+               COALESCE(SUM(play_count), 0) AS total_play,
+               COALESCE(SUM(like_count), 0) AS total_like,
+               COALESCE(SUM(comment_count), 0) AS total_comment,
+               ROUND(CASE WHEN COALESCE(SUM(play_count), 0) = 0 THEN 0
+                          ELSE COALESCE(SUM(like_count), 0) / COALESCE(SUM(play_count), 0)
+                          END, 6) AS like_rate,
+               ROUND(CASE WHEN COALESCE(SUM(play_count), 0) = 0 THEN 0
+                          ELSE COALESCE(SUM(comment_count), 0) / COALESCE(SUM(play_count), 0)
+                          END, 6) AS comment_rate,
+               ROUND(CASE WHEN COALESCE(SUM(play_count), 0) = 0 THEN 0
+                          ELSE (COALESCE(SUM(like_count), 0) + COALESCE(SUM(comment_count), 0)) / COALESCE(SUM(play_count), 0)
+                          END, 6) AS engagement_rate
+        FROM video
+        WHERE tenant_user_id = #{tenantUserId}
+        <if test="platform != null and platform != ''">
+            AND COALESCE(source_platform, 'unknown') = #{platform}
+        </if>
+        GROUP BY category
+        HAVING COALESCE(SUM(play_count), 0) > 0
+        ORDER BY engagement_rate DESC, video_count DESC
+    </select>
+
+    <select id="selectTopEngagementVideos" resultType="com.video.analysis.dto.VideoEngagementVO">
+        SELECT id,
+               title,
+               author,
+               COALESCE(source_platform, 'unknown') AS source_platform,
+               category,
+               play_count,
+               like_count,
+               comment_count,
+               ROUND(CASE WHEN play_count = 0 THEN 0
+                          ELSE (COALESCE(like_count, 0) + COALESCE(comment_count, 0)) / play_count
+                          END, 6) AS engagement_rate
+        FROM video
+        WHERE tenant_user_id = #{tenantUserId}
+          AND play_count >= #{minPlay}
+        <if test="platform != null and platform != ''">
+            AND COALESCE(source_platform, 'unknown') = #{platform}
+        </if>
+        ORDER BY engagement_rate DESC, like_count DESC, comment_count DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectUserInterest" resultType="com.video.analysis.dto.UserInterestVO">
+        WITH top_users AS (
+            SELECT ub.user_id AS user_id,
+                   COUNT(*) AS action_count,
+                   SUM(CASE WHEN ub.action = 'play' THEN 1 ELSE 0 END) AS play_count,
+                   SUM(CASE WHEN ub.action = 'like' THEN 1 ELSE 0 END) AS like_count,
+                   SUM(CASE WHEN ub.action = 'comment' THEN 1 ELSE 0 END) AS comment_action_count,
+                   COUNT(DISTINCT DATE(ub.time)) AS active_days,
+                   MAX(ub.time) AS last_active_time
+            FROM user_behavior ub
+            JOIN video vf ON ub.video_id = vf.id
+            WHERE ub.tenant_user_id = #{tenantUserId}
+              AND vf.tenant_user_id = #{tenantUserId}
+            <if test="platform != null and platform != ''">
+              AND COALESCE(vf.source_platform, 'unknown') = #{platform}
+            </if>
+            GROUP BY ub.user_id
+            ORDER BY action_count DESC, ub.user_id ASC
+            LIMIT #{limit}
+        ),
+             user_category AS (
+                 SELECT ub.user_id AS user_id,
+                        v.category AS category,
+                        COUNT(*) AS category_action_count,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY ub.user_id
+                            ORDER BY COUNT(*) DESC, v.category
+                            ) AS rn
+                 FROM user_behavior ub
+                 JOIN top_users tu ON ub.user_id = tu.user_id
+                 JOIN video v ON ub.video_id = v.id
+                 WHERE ub.tenant_user_id = #{tenantUserId}
+                   AND v.tenant_user_id = #{tenantUserId}
+                 <if test="platform != null and platform != ''">
+                     AND COALESCE(v.source_platform, 'unknown') = #{platform}
+                 </if>
+                 GROUP BY ub.user_id, v.category
+             ),
+             user_platform AS (
+                 SELECT ub.user_id AS user_id,
+                        COALESCE(v.source_platform, 'unknown') AS source_platform,
+                        COUNT(*) AS platform_action_count,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY ub.user_id
+                            ORDER BY COUNT(*) DESC, COALESCE(v.source_platform, 'unknown')
+                            ) AS rn
+                 FROM user_behavior ub
+                 JOIN top_users tu ON ub.user_id = tu.user_id
+                 JOIN video v ON ub.video_id = v.id
+                 WHERE ub.tenant_user_id = #{tenantUserId}
+                   AND v.tenant_user_id = #{tenantUserId}
+                 <if test="platform != null and platform != ''">
+                     AND COALESCE(v.source_platform, 'unknown') = #{platform}
+                 </if>
+                 GROUP BY ub.user_id, COALESCE(v.source_platform, 'unknown')
+             ),
+             user_diversity AS (
+                 SELECT ub.user_id AS user_id,
+                        COUNT(DISTINCT v.category) AS category_diversity,
+                        COUNT(DISTINCT COALESCE(v.source_platform, 'unknown')) AS platform_diversity
+                 FROM user_behavior ub
+                 JOIN top_users tu ON ub.user_id = tu.user_id
+                 JOIN video v ON ub.video_id = v.id
+                 WHERE ub.tenant_user_id = #{tenantUserId}
+                   AND v.tenant_user_id = #{tenantUserId}
+                 <if test="platform != null and platform != ''">
+                     AND COALESCE(v.source_platform, 'unknown') = #{platform}
+                 </if>
+                 GROUP BY ub.user_id
+             )
+        SELECT tu.user_id AS user_id,
+               COALESCE(u.user_name, CONCAT('user_', tu.user_id)) AS user_name,
+               tu.action_count AS action_count,
+               tu.play_count AS play_count,
+               tu.like_count AS like_count,
+               tu.comment_action_count AS comment_action_count,
+               COALESCE(uc.category, 'unknown') AS favorite_category,
+               COALESCE(up.source_platform, 'unknown') AS favorite_platform,
+               COALESCE(ud.category_diversity, 0) AS category_diversity,
+               COALESCE(ud.platform_diversity, 0) AS platform_diversity,
+               tu.active_days AS active_days,
+               tu.last_active_time AS last_active_time,
+               ROUND(CASE WHEN tu.active_days = 0 THEN 0
+                          ELSE tu.action_count / tu.active_days
+                          END, 2) AS avg_daily_actions,
+               ROUND(CASE WHEN tu.play_count = 0 THEN 0
+                          ELSE tu.like_count / tu.play_count
+                          END, 6) AS like_rate,
+               ROUND(CASE WHEN tu.play_count = 0 THEN 0
+                          ELSE tu.comment_action_count / tu.play_count
+                          END, 6) AS comment_rate,
+               ROUND(CASE WHEN tu.play_count = 0 THEN 0
+                          ELSE (tu.like_count + tu.comment_action_count) / tu.play_count
+                          END, 6) AS interaction_rate,
+               CASE
+                   WHEN tu.action_count &lt; 5 THEN 'light_browser'
+                   WHEN tu.play_count = 0 THEN 'non_play_interactor'
+                   WHEN (tu.like_count + tu.comment_action_count) / NULLIF(tu.play_count, 0) &gt;= 0.30
+                       AND tu.comment_action_count / NULLIF(tu.play_count, 0) &gt;= 0.06 THEN 'high_interaction_discuss'
+                   WHEN COALESCE(ud.category_diversity, 0) &gt;= 6
+                       AND COALESCE(ud.platform_diversity, 0) &gt;= 2 THEN 'cross_platform_explorer'
+                   WHEN tu.active_days &gt;= 15
+                       AND tu.action_count / NULLIF(tu.active_days, 0) &gt;= 6 THEN 'high_frequency_active'
+                   WHEN tu.like_count / NULLIF(tu.play_count, 0) &gt;= 0.12
+                       AND tu.comment_action_count / NULLIF(tu.play_count, 0) &lt; 0.04 THEN 'like_driven'
+                   ELSE 'steady_viewer'
+                   END AS profile_label
+        FROM top_users tu
+        LEFT JOIN `user` u ON tu.user_id = u.user_id AND u.tenant_user_id = #{tenantUserId}
+        LEFT JOIN user_category uc ON tu.user_id = uc.user_id AND uc.rn = 1
+        LEFT JOIN user_platform up ON tu.user_id = up.user_id AND up.rn = 1
+        LEFT JOIN user_diversity ud ON tu.user_id = ud.user_id
+        ORDER BY tu.action_count DESC, tu.user_id ASC
+    </select>
+
+    <select id="selectPlatformStats" resultType="com.video.analysis.dto.PlatformStatVO">
+        SELECT COALESCE(source_platform, 'unknown') AS source_platform,
+               COUNT(*) AS video_count,
+               COALESCE(SUM(play_count), 0) AS total_play
+        FROM video
+        WHERE tenant_user_id = #{tenantUserId}
+        <if test="platform != null and platform != ''">
+            AND COALESCE(source_platform, 'unknown') = #{platform}
+        </if>
+        GROUP BY COALESCE(source_platform, 'unknown')
+        ORDER BY video_count DESC, total_play DESC
+    </select>
+
+    <select id="selectPlatformFunnel" resultType="com.video.analysis.dto.FunnelStatVO">
+        SELECT COALESCE(source_platform, 'unknown') AS source_platform,
+               COUNT(*) AS video_count,
+               COALESCE(SUM(play_count), 0) AS total_play,
+               COALESCE(SUM(like_count), 0) AS total_like,
+               COALESCE(SUM(comment_count), 0) AS total_comment,
+               ROUND(CASE WHEN COALESCE(SUM(play_count), 0) = 0 THEN 0
+                          ELSE COALESCE(SUM(like_count), 0) / COALESCE(SUM(play_count), 0)
+                          END, 6) AS like_conversion_rate,
+               ROUND(CASE WHEN COALESCE(SUM(play_count), 0) = 0 THEN 0
+                          ELSE COALESCE(SUM(comment_count), 0) / COALESCE(SUM(play_count), 0)
+                          END, 6) AS comment_conversion_rate
+        FROM video
+        WHERE tenant_user_id = #{tenantUserId}
+        <if test="platform != null and platform != ''">
+            AND COALESCE(source_platform, 'unknown') = #{platform}
+        </if>
+        GROUP BY COALESCE(source_platform, 'unknown')
+        ORDER BY total_play DESC, video_count DESC
+    </select>
+
+    <select id="selectPlatformBenchmark" resultType="com.video.analysis.dto.PlatformBenchmarkVO">
+        SELECT COALESCE(source_platform, 'unknown') AS source_platform,
+               COUNT(*) AS video_count,
+               COALESCE(SUM(play_count), 0) AS total_play,
+               COALESCE(SUM(like_count), 0) AS total_like,
+               COALESCE(SUM(comment_count), 0) AS total_comment,
+               ROUND(CASE WHEN COUNT(*) = 0 THEN 0 ELSE COALESCE(SUM(play_count), 0) / COUNT(*) END, 2) AS avg_play_per_video,
+               ROUND(CASE WHEN COUNT(*) = 0 THEN 0 ELSE COALESCE(SUM(like_count), 0) / COUNT(*) END, 2) AS avg_like_per_video,
+               ROUND(CASE WHEN COUNT(*) = 0 THEN 0 ELSE COALESCE(SUM(comment_count), 0) / COUNT(*) END, 2) AS avg_comment_per_video,
+               ROUND(CASE WHEN COALESCE(SUM(play_count), 0) = 0 THEN 0
+                          ELSE (COALESCE(SUM(like_count), 0) + COALESCE(SUM(comment_count), 0)) * 1000 / COALESCE(SUM(play_count), 0)
+                          END, 2) AS engagement_per_thousand_play
+        FROM video
+        WHERE tenant_user_id = #{tenantUserId}
+        <if test="platform != null and platform != ''">
+            AND COALESCE(source_platform, 'unknown') = #{platform}
+        </if>
+        GROUP BY COALESCE(source_platform, 'unknown')
+        ORDER BY engagement_per_thousand_play DESC, total_play DESC
+    </select>
+
+    <select id="selectSourceTrace" resultType="com.video.analysis.dto.SourceTraceVO">
+        SELECT id,
+               title,
+               author,
+               COALESCE(source_platform, 'unknown') AS source_platform,
+               source_url,
+               import_type,
+               source_file,
+               import_time,
+               data_quality_score,
+               dedupe_key
+        FROM video
+        WHERE tenant_user_id = #{tenantUserId}
+        <if test="platform != null and platform != ''">
+            AND COALESCE(source_platform, 'unknown') = #{platform}
+        </if>
+        ORDER BY import_time DESC, id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectOverview" resultType="map">
+        SELECT
+            (SELECT COUNT(*)
+             FROM video v
+             WHERE v.tenant_user_id = #{tenantUserId}
+             <if test="platform != null and platform != ''">
+                 AND COALESCE(v.source_platform, 'unknown') = #{platform}
+             </if>) AS videoCount,
+            (SELECT COUNT(DISTINCT ub.user_id)
+             FROM user_behavior ub
+             JOIN video v ON ub.video_id = v.id
+             WHERE ub.tenant_user_id = #{tenantUserId}
+               AND v.tenant_user_id = #{tenantUserId}
+             <if test="platform != null and platform != ''">
+                 AND COALESCE(v.source_platform, 'unknown') = #{platform}
+             </if>) AS userCount,
+            (SELECT COUNT(*)
+             FROM comment c
+             JOIN video v ON c.video_id = v.id
+             WHERE c.tenant_user_id = #{tenantUserId}
+               AND v.tenant_user_id = #{tenantUserId}
+             <if test="platform != null and platform != ''">
+                 AND COALESCE(v.source_platform, 'unknown') = #{platform}
+             </if>) AS commentCount,
+            (SELECT COUNT(*)
+             FROM user_behavior ub
+             JOIN video v ON ub.video_id = v.id
+             WHERE ub.tenant_user_id = #{tenantUserId}
+               AND v.tenant_user_id = #{tenantUserId}
+             <if test="platform != null and platform != ''">
+                 AND COALESCE(v.source_platform, 'unknown') = #{platform}
+             </if>) AS behaviorCount,
+            (SELECT COALESCE(SUM(v.play_count), 0)
+             FROM video v
+             WHERE v.tenant_user_id = #{tenantUserId}
+             <if test="platform != null and platform != ''">
+                 AND COALESCE(v.source_platform, 'unknown') = #{platform}
+             </if>) AS totalPlayCount,
+            (SELECT COUNT(DISTINCT COALESCE(v.source_platform, 'unknown'))
+             FROM video v
+             WHERE v.tenant_user_id = #{tenantUserId}
+             <if test="platform != null and platform != ''">
+                 AND COALESCE(v.source_platform, 'unknown') = #{platform}
+             </if>) AS sourcePlatformCount
+    </select>
+
+</mapper>
