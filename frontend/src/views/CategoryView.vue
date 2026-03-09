@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <LoadingPanel v-if="loading" text="正在加载分类统计数据" />
 
   <template v-else>

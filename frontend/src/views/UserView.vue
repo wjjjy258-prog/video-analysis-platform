@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <LoadingPanel v-if="loading" text="正在生成用户画像分析" />
 
   <template v-else>

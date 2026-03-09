@@ -1,4 +1,4 @@
-export const stripHtmlTags = (value) => String(value ?? "").replace(/<[^>]+>/g, " ");
+﻿export const stripHtmlTags = (value) => String(value ?? "").replace(/<[^>]+>/g, " ");
 
 const collapseWhitespace = (value) =>
   String(value ?? "")

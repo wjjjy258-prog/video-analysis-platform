@@ -1,4 +1,4 @@
-import { ref } from "vue";
+﻿import { ref } from "vue";
 
 const STORAGE_KEY = "video-analysis-platform:selected-platform";
 

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <LoadingPanel v-if="loading" text="正在加载热门视频数据" />
 
   <template v-else>

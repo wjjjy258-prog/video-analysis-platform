@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$MysqlHost = "localhost",
     [int]$MysqlPort = 3306,
     [string]$MysqlUser = "root",

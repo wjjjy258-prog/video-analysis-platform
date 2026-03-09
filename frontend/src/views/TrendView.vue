@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <LoadingPanel v-if="loading" text="正在计算互动效率指标" />
 
   <template v-else>

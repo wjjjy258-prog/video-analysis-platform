@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="toast-center" aria-live="polite" aria-atomic="true">
     <TransitionGroup name="toast" tag="div" class="toast-stack">
       <article v-for="item in toasts" :key="item.id" class="toast-item" :class="`toast-${item.type}`">

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <section class="hero-card">
     <div>
       <h2 class="hero-title">平台简介</h2>

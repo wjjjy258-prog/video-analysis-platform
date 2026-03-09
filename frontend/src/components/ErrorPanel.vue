@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <section class="panel panel-error">
     <div class="panel-error-head">
       <span class="panel-error-dot"></span>

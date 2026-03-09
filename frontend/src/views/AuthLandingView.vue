@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="auth-landing">
     <div class="danmaku-layer" aria-hidden="true">
       <span
