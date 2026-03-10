@@ -444,7 +444,7 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
     private void rebuildOverviewCacheForTenant(long tenantUserId) {
         long videoCount = queryLongValue("SELECT COUNT(*) FROM video WHERE tenant_user_id=?", tenantUserId);
         long userCount = queryLongValue("SELECT COUNT(DISTINCT user_id) FROM user_behavior WHERE tenant_user_id=?", tenantUserId);
-        long commentCount = queryLongValue("SELECT COUNT(*) FROM comment WHERE tenant_user_id=?", tenantUserId);
+        long commentCount = queryLongValue("SELECT COALESCE(SUM(comment_count), 0) FROM video WHERE tenant_user_id=?", tenantUserId);
         long behaviorCount = queryLongValue("SELECT COUNT(*) FROM user_behavior WHERE tenant_user_id=?", tenantUserId);
         long totalPlayCount = queryLongValue("SELECT COALESCE(SUM(play_count), 0) FROM video WHERE tenant_user_id=?", tenantUserId);
         int sourcePlatformCount = (int) queryLongValue(
@@ -465,7 +465,8 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
 
         Map<String, OverviewCounter> perPlatform = new LinkedHashMap<>();
         List<Map<String, Object>> videoRows = jdbcTemplate.queryForList(
-                "SELECT COALESCE(source_platform, 'unknown') AS source_platform, COUNT(*) AS video_count, COALESCE(SUM(play_count), 0) AS total_play " +
+                "SELECT COALESCE(source_platform, 'unknown') AS source_platform, COUNT(*) AS video_count, " +
+                        "COALESCE(SUM(play_count), 0) AS total_play, COALESCE(SUM(comment_count), 0) AS total_comment " +
                         "FROM video WHERE tenant_user_id=? GROUP BY COALESCE(source_platform, 'unknown')",
                 tenantUserId
         );
@@ -474,6 +475,7 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
             OverviewCounter counter = perPlatform.computeIfAbsent(platform, key -> new OverviewCounter());
             counter.videoCount = asLongNumber(row.get("video_count"));
             counter.totalPlayCount = asLongNumber(row.get("total_play"));
+            counter.commentCount = asLongNumber(row.get("total_comment"));
         }
 
         List<Map<String, Object>> behaviorRows = jdbcTemplate.queryForList(
@@ -489,20 +491,6 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
             OverviewCounter counter = perPlatform.computeIfAbsent(platform, key -> new OverviewCounter());
             counter.behaviorCount = asLongNumber(row.get("behavior_count"));
             counter.userCount = asLongNumber(row.get("user_count"));
-        }
-
-        List<Map<String, Object>> commentRows = jdbcTemplate.queryForList(
-                "SELECT COALESCE(v.source_platform, 'unknown') AS source_platform, COUNT(*) AS comment_count " +
-                        "FROM comment c JOIN video v ON c.video_id=v.id " +
-                        "WHERE c.tenant_user_id=? AND v.tenant_user_id=? " +
-                        "GROUP BY COALESCE(v.source_platform, 'unknown')",
-                tenantUserId,
-                tenantUserId
-        );
-        for (Map<String, Object> row : commentRows) {
-            String platform = normalizePlatformKey(row.get("source_platform"));
-            OverviewCounter counter = perPlatform.computeIfAbsent(platform, key -> new OverviewCounter());
-            counter.commentCount = asLongNumber(row.get("comment_count"));
         }
 
         jdbcTemplate.update(

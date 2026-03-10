@@ -104,10 +104,17 @@ onMounted(async () => {
     } else {
       clearAuth();
       await router.replace("/");
+      return;
     }
-  } catch {
-    clearAuth();
-    await router.replace("/");
+  } catch (error) {
+    // Keep local login state on transient network/backend errors.
+    // Only clear auth when server explicitly says the token is invalid.
+    const status = Number(error?.response?.status || 0);
+    if (status === 401 || status === 403) {
+      clearAuth();
+      await router.replace("/");
+      return;
+    }
   }
 
   const queryPlatform = route.query.platform;

@@ -16,6 +16,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
 import static org.springframework.http.HttpStatus.TOO_MANY_REQUESTS;
@@ -29,12 +30,18 @@ public class AuthServiceImpl implements AuthService {
     private static final int LOGIN_WINDOW_MINUTES = 10;
     private static final int LOCK_MINUTES = 15;
     private static final int TOKEN_BYTES = 48;
+    private static final int SESSION_ACTIVITY_TOUCH_SECONDS = 120;
+    private static final int LOGIN_ATTEMPT_RETENTION_MINUTES = LOCK_MINUTES + LOGIN_WINDOW_MINUTES + 5;
+    private static final long LOGIN_ATTEMPT_CLEANUP_EVERY_OPS = 200;
+    private static final int LOGIN_ATTEMPT_CLEANUP_SIZE_THRESHOLD = 2000;
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final Base64.Encoder TOKEN_ENCODER = Base64.getUrlEncoder().withoutPadding();
 
     private final JdbcTemplate jdbcTemplate;
     private final Map<String, LoginAttemptState> loginAttemptMap = new ConcurrentHashMap<>();
+    private final AtomicLong loginAttemptOps = new AtomicLong();
+    private volatile LocalDateTime lastLoginAttemptCleanup = LocalDateTime.MIN;
 
     public AuthServiceImpl(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
@@ -48,12 +55,12 @@ public class AuthServiceImpl implements AuthService {
         String confirm = request.getConfirmPassword() == null ? "" : request.getConfirmPassword().trim();
 
         if (!password.equals(confirm)) {
-            throw new ResponseStatusException(BAD_REQUEST, "两次输入的密码不一致。");
+            throw new ResponseStatusException(BAD_REQUEST, "Passwords do not match.");
         }
         validatePasswordStrength(password);
 
         if (findUserByUsername(username) != null) {
-            throw new ResponseStatusException(BAD_REQUEST, "用户名已存在，请更换用户名。");
+            throw new ResponseStatusException(BAD_REQUEST, "Username already exists.");
         }
 
         String salt = PasswordUtil.randomSaltHex();
@@ -70,17 +77,17 @@ public class AuthServiceImpl implements AuthService {
                     Timestamp.valueOf(now)
             );
         } catch (DuplicateKeyException ex) {
-            throw new ResponseStatusException(BAD_REQUEST, "用户名已存在，请更换用户名。");
+            throw new ResponseStatusException(BAD_REQUEST, "Username already exists.");
         }
 
         AppUserRow user = findUserByUsername(username);
         if (user == null) {
-            throw new ResponseStatusException(BAD_REQUEST, "注册失败，请重试。");
+            throw new ResponseStatusException(BAD_REQUEST, "Register failed. Please retry.");
         }
 
         SessionInfo session = createSession(user.id());
         return AuthResponse.success(
-                "注册成功。",
+                "Register success.",
                 session.token(),
                 session.expiresAt(),
                 new AuthResponse.UserInfo(user.id(), user.username(), user.createdAt())
@@ -103,7 +110,7 @@ public class AuthServiceImpl implements AuthService {
         if (user == null || !PasswordUtil.verify(password, user.passwordSalt(), user.passwordHash())) {
             recordFailedAttempt(userKey);
             recordFailedAttempt(ipKey);
-            throw new ResponseStatusException(UNAUTHORIZED, "用户名或密码错误。");
+            throw new ResponseStatusException(UNAUTHORIZED, "Invalid username or password.");
         }
 
         clearLoginAttempt(userKey);
@@ -112,7 +119,7 @@ public class AuthServiceImpl implements AuthService {
 
         SessionInfo session = createSession(user.id());
         return AuthResponse.success(
-                "登录成功。",
+                "Login success.",
                 session.token(),
                 session.expiresAt(),
                 new AuthResponse.UserInfo(user.id(), user.username(), user.createdAt())
@@ -137,14 +144,14 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponse current(String token) {
         AuthPrincipal principal = resolveToken(token);
         if (principal == null) {
-            throw new ResponseStatusException(UNAUTHORIZED, "登录状态已过期，请重新登录。");
+            throw new ResponseStatusException(UNAUTHORIZED, "Session expired. Please login again.");
         }
         AppUserRow user = findUserById(principal.userId());
         if (user == null) {
-            throw new ResponseStatusException(UNAUTHORIZED, "用户不存在，请重新登录。");
+            throw new ResponseStatusException(UNAUTHORIZED, "User not found. Please login again.");
         }
         return AuthResponse.success(
-                "状态有效。",
+                "Session valid.",
                 principal.token(),
                 readSessionExpiresAt(principal.token()),
                 new AuthResponse.UserInfo(user.id(), user.username(), user.createdAt())
@@ -177,10 +184,13 @@ public class AuthServiceImpl implements AuthService {
         if (rows.isEmpty()) {
             return null;
         }
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime touchThreshold = now.minusSeconds(SESSION_ACTIVITY_TOUCH_SECONDS);
         jdbcTemplate.update(
-                "UPDATE app_session SET last_active_at=? WHERE token=?",
-                Timestamp.valueOf(LocalDateTime.now()),
-                pureToken
+                "UPDATE app_session SET last_active_at=? WHERE token=? AND last_active_at < ?",
+                Timestamp.valueOf(now),
+                pureToken,
+                Timestamp.valueOf(touchThreshold)
         );
         return rows.get(0);
     }
@@ -188,7 +198,7 @@ public class AuthServiceImpl implements AuthService {
     private String normalizeUsername(String username) {
         String value = username == null ? "" : username.trim();
         if (value.isEmpty()) {
-            throw new ResponseStatusException(BAD_REQUEST, "用户名不能为空。");
+            throw new ResponseStatusException(BAD_REQUEST, "Username cannot be empty.");
         }
         return value;
     }
@@ -207,7 +217,7 @@ public class AuthServiceImpl implements AuthService {
     private void validatePasswordStrength(String password) {
         String value = password == null ? "" : password.trim();
         if (value.length() < 8) {
-            throw new ResponseStatusException(BAD_REQUEST, "密码长度至少 8 位。");
+            throw new ResponseStatusException(BAD_REQUEST, "Password length must be at least 8.");
         }
         boolean hasLetter = false;
         boolean hasDigit = false;
@@ -222,17 +232,18 @@ public class AuthServiceImpl implements AuthService {
                 return;
             }
         }
-        throw new ResponseStatusException(BAD_REQUEST, "密码需包含字母和数字。");
+        throw new ResponseStatusException(BAD_REQUEST, "Password must contain letters and digits.");
     }
 
     private void ensureNotLocked(String key) {
+        LocalDateTime now = LocalDateTime.now();
+        cleanupExpiredLoginAttempts(now);
         LoginAttemptState state = loginAttemptMap.get(key);
         if (state == null) {
             return;
         }
-        LocalDateTime now = LocalDateTime.now();
         if (state.lockedUntil() != null && state.lockedUntil().isAfter(now)) {
-            throw new ResponseStatusException(TOO_MANY_REQUESTS, "登录尝试过于频繁，请稍后再试。");
+            throw new ResponseStatusException(TOO_MANY_REQUESTS, "Too many login attempts. Please retry later.");
         }
         if (state.windowStartedAt().plusMinutes(LOGIN_WINDOW_MINUTES).isBefore(now)) {
             loginAttemptMap.remove(key, state);
@@ -241,6 +252,7 @@ public class AuthServiceImpl implements AuthService {
 
     private void recordFailedAttempt(String key) {
         LocalDateTime now = LocalDateTime.now();
+        cleanupExpiredLoginAttempts(now);
         loginAttemptMap.compute(key, (unused, current) -> {
             if (current == null || current.windowStartedAt().plusMinutes(LOGIN_WINDOW_MINUTES).isBefore(now)) {
                 return new LoginAttemptState(1, now, null);
@@ -258,6 +270,33 @@ public class AuthServiceImpl implements AuthService {
 
     private void clearLoginAttempt(String key) {
         loginAttemptMap.remove(key);
+    }
+
+    private void cleanupExpiredLoginAttempts(LocalDateTime now) {
+        if (loginAttemptMap.isEmpty()) {
+            return;
+        }
+        long opCount = loginAttemptOps.incrementAndGet();
+        boolean oversize = loginAttemptMap.size() >= LOGIN_ATTEMPT_CLEANUP_SIZE_THRESHOLD;
+        boolean periodic = opCount % LOGIN_ATTEMPT_CLEANUP_EVERY_OPS == 0;
+        boolean dueByTime = lastLoginAttemptCleanup.plusMinutes(1).isBefore(now);
+        if (!oversize && !periodic && !dueByTime) {
+            return;
+        }
+
+        for (Map.Entry<String, LoginAttemptState> entry : loginAttemptMap.entrySet()) {
+            LoginAttemptState state = entry.getValue();
+            if (state == null) {
+                loginAttemptMap.remove(entry.getKey());
+                continue;
+            }
+            LocalDateTime lockUntil = state.lockedUntil();
+            LocalDateTime retentionUntil = state.windowStartedAt().plusMinutes(LOGIN_ATTEMPT_RETENTION_MINUTES);
+            if ((lockUntil == null || !lockUntil.isAfter(now)) && retentionUntil.isBefore(now)) {
+                loginAttemptMap.remove(entry.getKey(), state);
+            }
+        }
+        lastLoginAttemptCleanup = now;
     }
 
     private void upgradePasswordHashIfNeeded(Long userId, String rawPassword, String currentHash) {

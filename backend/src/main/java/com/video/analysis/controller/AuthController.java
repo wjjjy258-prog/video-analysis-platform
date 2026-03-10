@@ -84,14 +84,42 @@ public class AuthController {
     }
 
     private String resolveClientIp(HttpServletRequest request) {
-        String fromForward = request.getHeader("X-Forwarded-For");
-        if (fromForward != null && !fromForward.isBlank()) {
-            return fromForward.split(",")[0].trim();
+        String remoteAddr = request.getRemoteAddr();
+        if (isTrustedProxy(remoteAddr)) {
+            String fromForward = request.getHeader("X-Forwarded-For");
+            if (fromForward != null && !fromForward.isBlank()) {
+                return fromForward.split(",")[0].trim();
+            }
+            String fromRealIp = request.getHeader("X-Real-IP");
+            if (fromRealIp != null && !fromRealIp.isBlank()) {
+                return fromRealIp.trim();
+            }
         }
-        String fromRealIp = request.getHeader("X-Real-IP");
-        if (fromRealIp != null && !fromRealIp.isBlank()) {
-            return fromRealIp.trim();
+        return remoteAddr;
+    }
+
+    private boolean isTrustedProxy(String remoteAddr) {
+        if (remoteAddr == null || remoteAddr.isBlank()) {
+            return false;
         }
-        return request.getRemoteAddr();
+        String ip = remoteAddr.trim().toLowerCase();
+        if ("127.0.0.1".equals(ip) || "::1".equals(ip) || ip.startsWith("0:0:0:0:0:0:0:1")) {
+            return true;
+        }
+        if (ip.startsWith("10.") || ip.startsWith("192.168.")) {
+            return true;
+        }
+        if (ip.startsWith("172.")) {
+            String[] parts = ip.split("\\.");
+            if (parts.length >= 2) {
+                try {
+                    int second = Integer.parseInt(parts[1]);
+                    return second >= 16 && second <= 31;
+                } catch (NumberFormatException ignored) {
+                    return false;
+                }
+            }
+        }
+        return false;
     }
 }

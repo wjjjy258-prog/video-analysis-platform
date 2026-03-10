@@ -4,7 +4,6 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
-import * as echarts from "echarts";
 
 const props = defineProps({
   option: {
@@ -15,8 +14,23 @@ const props = defineProps({
 
 const chartRef = ref(null);
 let chartInstance = null;
+let echartsModule = null;
+let echartsLoadingPromise = null;
 
-const renderChart = () => {
+const loadEcharts = async () => {
+  if (echartsModule) return echartsModule;
+  if (!echartsLoadingPromise) {
+    echartsLoadingPromise = import("../utils/echarts").then((mod) => {
+      echartsModule = mod.default;
+      return echartsModule;
+    });
+  }
+  return echartsLoadingPromise;
+};
+
+const renderChart = async () => {
+  if (!chartRef.value) return;
+  const echarts = await loadEcharts();
   if (!chartRef.value) return;
   if (!chartInstance) {
     chartInstance = echarts.init(chartRef.value);
@@ -32,12 +46,12 @@ const resizeChart = () => {
 
 watch(
   () => props.option,
-  () => renderChart(),
+  () => void renderChart(),
   { deep: true }
 );
 
 onMounted(() => {
-  renderChart();
+  void renderChart();
   window.addEventListener("resize", resizeChart);
 });
 

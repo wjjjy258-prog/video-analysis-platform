@@ -51,6 +51,7 @@ public class CrawlerServiceImpl implements CrawlerService {
 
     private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("(?s)```(?:json)?\\s*(\\{.*?}|\\[.*?])\\s*```");
     private static final Pattern TABLE_SPLIT_PATTERN = Pattern.compile("\\s*\\|\\s*");
+    private static final Pattern TABLE_SEPARATOR_PATTERN = Pattern.compile("^\\s*\\|?\\s*[:\\-\\s|]+\\|?\\s*$");
     private static final Pattern KEY_VALUE_PATTERN = Pattern.compile("^[-*\\s]*([^:\uFF1A]{1,80})\\s*[:\uFF1A]\\s*(.+)$");
     private static final Pattern NUMBER_PATTERN = Pattern.compile("([0-9]+(?:\\.[0-9]+)?)\\s*([wWkK\u4e07\u4ebf]?)");
     private static final Pattern URL_PATTERN = Pattern.compile("https?://\\S+");
@@ -651,21 +652,21 @@ public class CrawlerServiceImpl implements CrawlerService {
             if (!lines[i].contains("|")) {
                 continue;
             }
-            if (!lines[i + 1].matches("^\\s*\\|?\\s*[:\\-\\s|]+\\|?\\s*$")) {
+            if (!TABLE_SEPARATOR_PATTERN.matcher(lines[i + 1]).matches()) {
                 continue;
             }
 
             List<String> headers = splitTableLine(lines[i]);
             int rowIndex = i + 2;
             while (rowIndex < lines.length && lines[rowIndex].contains("|")) {
-                if (lines[rowIndex].matches("^\\s*\\|?\\s*[:\\-\\s|]+\\|?\\s*$")) {
+                if (TABLE_SEPARATOR_PATTERN.matcher(lines[rowIndex]).matches()) {
                     rowIndex++;
                     continue;
                 }
                 List<String> values = splitTableLine(lines[rowIndex]);
                 Map<String, Object> map = new LinkedHashMap<>();
                 for (int c = 0; c < Math.min(headers.size(), values.size()); c++) {
-                    map.put(headers.get(c), values.get(c));
+                    map.put(resolveHeaderKey(headers.get(c)), values.get(c));
                 }
                 VideoRow row = rowFromMap(map, defaultPlatform, importType, sourceFile, tenantUserId);
                 if (row != null) {
@@ -694,21 +695,20 @@ public class CrawlerServiceImpl implements CrawlerService {
 
     private List<VideoRow> parseCsv(String text, String defaultPlatform, String importType, String sourceFile, long tenantUserId) {
         List<VideoRow> rows = new ArrayList<>();
-        String[] lines = text.split("\\r?\\n");
-        if (lines.length < 2) {
+        List<List<String>> records = splitCsvRecords(text);
+        if (records.size() < 2) {
             return rows;
         }
 
         int headerIndex = -1;
         List<String> headers = List.of();
-        for (int i = 0; i < lines.length; i++) {
-            String line = stripBom(lines[i]).trim();
-            if (line.isEmpty() || !line.contains(",")) {
+        for (int i = 0; i < records.size(); i++) {
+            List<String> row = records.get(i);
+            if (row.size() < 2 || isBlankRow(row)) {
                 continue;
             }
-            List<String> parsed = splitCsvLine(line);
-            if (parsed.size() >= 2) {
-                headers = parsed;
+            if (isLikelyHeaderRow(row) || i == 0) {
+                headers = normalizeHeaders(row);
                 headerIndex = i;
                 break;
             }
@@ -717,13 +717,13 @@ public class CrawlerServiceImpl implements CrawlerService {
             return rows;
         }
 
-        for (int i = headerIndex + 1; i < lines.length; i++) {
-            String line = lines[i].trim();
-            if (line.isEmpty() || line.startsWith("#") || !line.contains(",")) {
+        for (int i = headerIndex + 1; i < records.size(); i++) {
+            List<String> values = records.get(i);
+            if (values.isEmpty() || isBlankRow(values)) {
                 continue;
             }
-            List<String> values = splitCsvLine(line);
-            if (values.isEmpty()) {
+            String firstCell = values.get(0) == null ? "" : values.get(0).trim();
+            if (firstCell.startsWith("#")) {
                 continue;
             }
             Map<String, Object> map = new LinkedHashMap<>();
@@ -738,31 +738,104 @@ public class CrawlerServiceImpl implements CrawlerService {
         return rows;
     }
 
-    private List<String> splitCsvLine(String line) {
-        List<String> cells = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
+    private List<List<String>> splitCsvRecords(String text) {
+        List<List<String>> records = new ArrayList<>();
+        if (text == null || text.isBlank()) {
+            return records;
+        }
+
+        List<String> row = new ArrayList<>();
+        StringBuilder cell = new StringBuilder();
+        String source = stripBom(text);
         boolean inQuotes = false;
 
-        for (int i = 0; i < line.length(); i++) {
-            char ch = line.charAt(i);
+        for (int i = 0; i < source.length(); i++) {
+            char ch = source.charAt(i);
+
             if (ch == '"') {
-                if (inQuotes && i + 1 < line.length() && line.charAt(i + 1) == '"') {
-                    current.append('"');
+                if (inQuotes && i + 1 < source.length() && source.charAt(i + 1) == '"') {
+                    cell.append('"');
                     i++;
                 } else {
                     inQuotes = !inQuotes;
                 }
                 continue;
             }
+
             if (ch == ',' && !inQuotes) {
-                cells.add(current.toString().trim());
-                current.setLength(0);
+                row.add(cell.toString().trim());
+                cell.setLength(0);
                 continue;
             }
-            current.append(ch);
+
+            if ((ch == '\r' || ch == '\n') && !inQuotes) {
+                if (ch == '\r' && i + 1 < source.length() && source.charAt(i + 1) == '\n') {
+                    i++;
+                }
+                row.add(cell.toString().trim());
+                cell.setLength(0);
+                if (!isBlankRow(row)) {
+                    records.add(row);
+                }
+                row = new ArrayList<>();
+                continue;
+            }
+
+            if (ch == '\r' && inQuotes) {
+                continue;
+            }
+
+            if (ch == '\n' && inQuotes) {
+                cell.append('\n');
+                continue;
+            }
+
+            cell.append(ch);
         }
-        cells.add(current.toString().trim());
-        return cells;
+
+        if (cell.length() > 0 || !row.isEmpty()) {
+            row.add(cell.toString().trim());
+            if (!isBlankRow(row)) {
+                records.add(row);
+            }
+        }
+        return records;
+    }
+
+    private List<String> normalizeHeaders(List<String> headers) {
+        List<String> normalized = new ArrayList<>(headers.size());
+        for (String header : headers) {
+            normalized.add(resolveHeaderKey(header));
+        }
+        return normalized;
+    }
+
+    private String resolveHeaderKey(String rawHeader) {
+        String canonical = canonicalFieldKey(rawHeader);
+        if (canonical != null) {
+            return canonical;
+        }
+        String sanitized = sanitizeText(rawHeader);
+        return sanitized == null ? "" : sanitized;
+    }
+
+    private boolean isLikelyHeaderRow(List<String> row) {
+        int aliasCount = 0;
+        for (String cell : row) {
+            if (canonicalFieldKey(cell) != null) {
+                aliasCount++;
+            }
+        }
+        return aliasCount >= 1;
+    }
+
+    private boolean isBlankRow(List<String> row) {
+        for (String cell : row) {
+            if (cell != null && !cell.trim().isEmpty()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private String stripBom(String value) {
@@ -816,9 +889,13 @@ public class CrawlerServiceImpl implements CrawlerService {
     }
 
     private void putIfFound(Map<String, Object> map, String key, String text, String regex) {
-        Matcher m = Pattern.compile(regex).matcher(text);
-        if (m.find()) {
-            map.put(key, m.group(1).trim());
+        try {
+            Matcher m = Pattern.compile(regex).matcher(text);
+            if (m.find()) {
+                map.put(key, m.group(1).trim());
+            }
+        } catch (Exception ignored) {
+            // Guard against malformed regex patterns to avoid failing the whole import.
         }
     }
 
@@ -826,10 +903,11 @@ public class CrawlerServiceImpl implements CrawlerService {
         if (map == null || map.isEmpty()) {
             return null;
         }
+        Map<String, Object> normalizedMap = normalizeInputMap(map);
 
         // Title is mandatory to avoid low-value noisy rows.
         String title = pick(
-                map,
+                normalizedMap,
                 "title", "video_title", "name",
                 "\u6807\u9898", "\u89c6\u9891\u6807\u9898", "\u540d\u79f0"
         );
@@ -839,7 +917,7 @@ public class CrawlerServiceImpl implements CrawlerService {
         }
 
         String author = pick(
-                map,
+                normalizedMap,
                 "author", "up", "uploader", "up_name", "uname",
                 "\u4f5c\u8005", "\u535a\u4e3b", "up\u4e3b", "\u4e0a\u4f20\u8005"
         );
@@ -848,10 +926,10 @@ public class CrawlerServiceImpl implements CrawlerService {
             author = "unknown_author";
         }
 
-        String platformRaw = pick(map, "platform", "source_platform", "source", "\u5e73\u53f0", "\u6765\u6e90\u5e73\u53f0", "\u6765\u6e90");
+        String platformRaw = pick(normalizedMap, "platform", "source_platform", "source", "\u5e73\u53f0", "\u6765\u6e90\u5e73\u53f0", "\u6765\u6e90");
         String platform = normalizePlatform(platformRaw, defaultPlatform);
         String url = pick(
-                map,
+                normalizedMap,
                 "url", "link", "video_url", "href",
                 "\u89c6\u9891\u94fe\u63a5", "\u94fe\u63a5", "\u5730\u5740", "\u89c6\u9891\u5730\u5740"
         );
@@ -860,7 +938,7 @@ public class CrawlerServiceImpl implements CrawlerService {
         }
 
         String rawVideoId = pick(
-                map,
+                normalizedMap,
                 "video_id", "id", "aid", "aweme_id", "bvid", "bv",
                 "\u89c6\u9891id", "\u89c6\u9891\u7f16\u53f7"
         );
@@ -874,7 +952,7 @@ public class CrawlerServiceImpl implements CrawlerService {
         String videoSeed = defaultIfBlank(rawVideoId, dedupeKey);
         long videoId = hashLong("tenant:" + tenantUserId + ":video:" + videoSeed);
         String authorSeed = defaultIfBlank(
-                pick(map, "author_id", "uid", "mid", "user_id", "\u4f5c\u8005id", "\u7528\u6237id"),
+                pick(normalizedMap, "author_id", "uid", "mid", "user_id", "\u4f5c\u8005id", "\u7528\u6237id"),
                 platform + ":" + author
         );
         long authorId = hashLong("tenant:" + tenantUserId + ":author:" + authorSeed);
@@ -889,43 +967,43 @@ public class CrawlerServiceImpl implements CrawlerService {
         row.sourceUrl = normalizedSourceUrl;
 
         String category = sanitizeText(defaultIfBlank(
-                pick(map, "category", "type", "tname", "\u5206\u533a", "\u5206\u7c7b", "\u7c7b\u522b", "\u6807\u7b7e", "\u9891\u9053"),
+                pick(normalizedMap, "category", "type", "tname", "\u5206\u533a", "\u5206\u7c7b", "\u7c7b\u522b", "\u6807\u7b7e", "\u9891\u9053"),
                 "other"
         ));
         row.category = trim(normalizeCategory(defaultIfBlank(category, "other")), 60);
 
         row.playCount = parseCount(pick(
-                map,
+                normalizedMap,
                 "play_count", "play", "view", "views", "view_count", "playcount",
                 "\u64ad\u653e\u91cf", "\u64ad\u653e\u6570", "\u64ad\u653e", "\u89c2\u770b\u91cf", "\u89c2\u770b\u6570", "\u89c2\u770b", "\u6d4f\u89c8\u91cf"
         ));
         row.likeCount = parseCount(pick(
-                map,
+                normalizedMap,
                 "like_count", "likes", "like", "up", "thumbs_up",
                 "\u70b9\u8d5e\u91cf", "\u70b9\u8d5e\u6570", "\u70b9\u8d5e", "\u8d5e", "\u559c\u6b22\u91cf"
         ));
         row.commentCount = parseCount(pick(
-                map,
+                normalizedMap,
                 "comment_count", "reply_count", "comments", "comment", "reply", "danmaku", "danmaku_count",
                 "\u8bc4\u8bba\u91cf", "\u8bc4\u8bba\u6570", "\u8bc4\u8bba", "\u56de\u590d\u91cf", "\u56de\u590d", "\u5f39\u5e55\u91cf", "\u5f39\u5e55\u6570"
         ));
         row.shareCount = parseCount(pick(
-                map,
+                normalizedMap,
                 "share_count", "shares", "share",
                 "\u5206\u4eab\u91cf", "\u5206\u4eab\u6570", "\u8f6c\u53d1\u91cf", "\u8f6c\u53d1\u6570"
         ));
         row.favoriteCount = parseCount(pick(
-                map,
+                normalizedMap,
                 "favorite_count", "favorites", "collect_count", "collect", "fav_count",
                 "\u6536\u85cf\u91cf", "\u6536\u85cf\u6570", "\u6536\u85cf"
         ));
         row.durationSec = parseDurationSeconds(pick(
-                map,
+                normalizedMap,
                 "duration", "duration_sec", "duration_seconds", "video_duration", "length",
                 "\u65f6\u957f", "\u89c6\u9891\u65f6\u957f"
         ));
         row.publishTime = parseTime(pick(
-                map,
+                normalizedMap,
                 "publish_time", "publishTime", "pubdate", "date", "time", "ctime",
                 "\u53d1\u5e03\u65f6\u95f4", "\u53d1\u5e03\u65e5\u671f", "\u65e5\u671f", "\u65f6\u95f4"
         ));
@@ -935,18 +1013,18 @@ public class CrawlerServiceImpl implements CrawlerService {
         row.sourceFile = normalizedSourceFile == null ? null : trim(normalizedSourceFile, 260);
         row.importTime = LocalDateTime.now();
         row.authorId = authorId;
-        row.authorFans = parseCount(pick(map, "author_fans", "fans", "\u7c89\u4e1d", "\u7c89\u4e1d\u91cf", "\u7c89\u4e1d\u6570"));
-        row.authorFollow = parseCount(pick(map, "author_follow", "follow", "following", "\u5173\u6ce8", "\u5173\u6ce8\u91cf", "\u5173\u6ce8\u6570"));
-        long level = parseCount(pick(map, "author_level", "level", "\u7b49\u7ea7"));
+        row.authorFans = parseCount(pick(normalizedMap, "author_fans", "fans", "\u7c89\u4e1d", "\u7c89\u4e1d\u91cf", "\u7c89\u4e1d\u6570"));
+        row.authorFollow = parseCount(pick(normalizedMap, "author_follow", "follow", "following", "\u5173\u6ce8", "\u5173\u6ce8\u91cf", "\u5173\u6ce8\u6570"));
+        long level = parseCount(pick(normalizedMap, "author_level", "level", "\u7b49\u7ea7"));
         row.authorLevel = (int) Math.max(1, Math.min(level <= 0 ? 1 : level, 10));
         row.tagsJson = normalizeTagsToJson(pick(
-                map,
+                normalizedMap,
                 "tags", "tag", "keywords", "labels",
                 "\u6807\u7b7e", "\u8bdd\u9898", "\u5173\u952e\u8bcd"
         ));
-        row.extraJson = trimNullable(toJson(map), 4000);
-        row.rawPayload = trimNullable(toJson(map), MAX_REJECT_RAW_LENGTH);
-        row.aiConfidence = parseConfidence(pick(map, "confidence", "ai_confidence", "\u7f6e\u4fe1\u5ea6"));
+        row.extraJson = trimNullable(toJson(normalizedMap), 4000);
+        row.rawPayload = trimNullable(toJson(normalizedMap), MAX_REJECT_RAW_LENGTH);
+        row.aiConfidence = parseConfidence(pick(normalizedMap, "confidence", "ai_confidence", "\u7f6e\u4fe1\u5ea6"));
         row.aiUsed = false;
         row.dataQualityScore = computeQualityScore(row);
         row.qualityLevel = resolveQualityLevel(row.dataQualityScore);
@@ -1009,17 +1087,12 @@ public class CrawlerServiceImpl implements CrawlerService {
             return null;
         }
     }
-    private String pick(Map<String, Object> map, String... keys) {
-        if (map == null || map.isEmpty()) {
+    private String pick(Map<String, Object> normalizedMap, String... keys) {
+        if (normalizedMap == null || normalizedMap.isEmpty()) {
             return null;
         }
-        Map<String, Object> normalized = new HashMap<>();
-        for (Map.Entry<String, Object> entry : map.entrySet()) {
-            normalized.put(normKey(entry.getKey()), entry.getValue());
-        }
-
         for (String key : keys) {
-            Object value = normalized.get(normKey(key));
+            Object value = normalizedMap.get(normKey(key));
             if (value != null) {
                 String text = String.valueOf(value).trim();
                 if (!text.isEmpty() && !"null".equalsIgnoreCase(text)) {
@@ -1030,14 +1103,107 @@ public class CrawlerServiceImpl implements CrawlerService {
         return null;
     }
 
+    private Map<String, Object> normalizeInputMap(Map<String, Object> rawMap) {
+        Map<String, Object> normalized = new HashMap<>();
+        if (rawMap == null || rawMap.isEmpty()) {
+            return normalized;
+        }
+
+        for (Map.Entry<String, Object> entry : rawMap.entrySet()) {
+            String key = normKey(entry.getKey());
+            if (key.isBlank()) {
+                continue;
+            }
+            Object value = entry.getValue();
+            normalized.putIfAbsent(key, value);
+
+            String canonical = canonicalFieldKey(key);
+            if (canonical != null) {
+                normalized.putIfAbsent(normKey(canonical), value);
+            }
+        }
+        return normalized;
+    }
+
+    private String canonicalFieldKey(String rawKey) {
+        String key = normKey(rawKey);
+        if (key.isBlank()) {
+            return null;
+        }
+        if ("title".equals(key) || "videotitle".equals(key) || "name".equals(key)
+                || "标题".equals(key) || "视频标题".equals(key) || "作品标题".equals(key) || "题目".equals(key)
+                || key.contains("标题")) {
+            return "title";
+        }
+        if ("author".equals(key) || "up".equals(key) || "uploader".equals(key) || "upname".equals(key) || "uname".equals(key)
+                || "作者".equals(key) || "博主".equals(key) || "up主".equals(key) || "上传者".equals(key)) {
+            return "author";
+        }
+        if ("platform".equals(key) || "sourceplatform".equals(key) || "source".equals(key)
+                || "平台".equals(key) || "来源平台".equals(key) || "来源".equals(key)) {
+            return "platform";
+        }
+        if ("category".equals(key) || "type".equals(key) || "tname".equals(key)
+                || "分区".equals(key) || "分类".equals(key) || "类别".equals(key) || "频道".equals(key)) {
+            return "category";
+        }
+        if ("videourl".equals(key) || "url".equals(key) || "link".equals(key) || "href".equals(key)
+                || "链接".equals(key) || "视频链接".equals(key) || "地址".equals(key) || "来源链接".equals(key)) {
+            return "url";
+        }
+        if ("videoid".equals(key) || "id".equals(key) || "aid".equals(key) || "awemeid".equals(key)
+                || "bvid".equals(key) || "bv".equals(key) || "视频id".equals(key) || "视频编号".equals(key)) {
+            return "video_id";
+        }
+        if ("playcount".equals(key) || "view".equals(key) || "views".equals(key) || "viewcount".equals(key)
+                || "播放量".equals(key) || "播放数".equals(key) || "观看量".equals(key) || "浏览量".equals(key)
+                || key.contains("播放")) {
+            return "play_count";
+        }
+        if ("likecount".equals(key) || "likes".equals(key) || "like".equals(key) || "thumbsup".equals(key)
+                || "点赞量".equals(key) || "点赞数".equals(key) || "点赞".equals(key) || "赞".equals(key)) {
+            return "like_count";
+        }
+        if ("commentcount".equals(key) || "comments".equals(key) || "comment".equals(key) || "replycount".equals(key)
+                || "danmakucount".equals(key) || "评论量".equals(key) || "评论数".equals(key) || "评论".equals(key)
+                || "弹幕量".equals(key) || "弹幕数".equals(key) || key.contains("评论") || key.contains("弹幕")) {
+            return "comment_count";
+        }
+        if ("sharecount".equals(key) || "shares".equals(key) || "share".equals(key)
+                || "分享量".equals(key) || "分享数".equals(key) || "转发量".equals(key) || "转发数".equals(key)) {
+            return "share_count";
+        }
+        if ("favoritecount".equals(key) || "favorites".equals(key) || "collectcount".equals(key) || "favcount".equals(key)
+                || "收藏量".equals(key) || "收藏数".equals(key) || "收藏".equals(key)) {
+            return "favorite_count";
+        }
+        if ("publishtime".equals(key) || "publishdate".equals(key) || "pubdate".equals(key) || "date".equals(key)
+                || "time".equals(key) || "发布时间".equals(key) || "发布日期".equals(key) || "日期".equals(key)) {
+            return "publish_time";
+        }
+        if ("tags".equals(key) || "tag".equals(key) || "keywords".equals(key) || "labels".equals(key)
+                || "标签".equals(key) || "话题".equals(key) || "关键词".equals(key)) {
+            return "tags";
+        }
+        return null;
+    }
+
     private String normKey(String key) {
-        return key == null ? "" : key.toLowerCase(Locale.ROOT)
-                .replace("_", "")
-                .replace("-", "")
-                .replace(" ", "")
-                .replace("\u3000", "")
-                .replace("\uFF1A", "")
-                .replace(":", "");
+        if (key == null) {
+            return "";
+        }
+        String value = key.trim().toLowerCase(Locale.ROOT);
+        if (value.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (Character.isLetterOrDigit(ch) || (ch >= '\u4e00' && ch <= '\u9fff')) {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
     }
 
     private String normalizePlatform(String platform, String fallback) {

@@ -180,7 +180,19 @@ const PROFILE_ADVICE = {
   steady_viewer: "建议保持稳定题材供给，逐步测试内容扩展边界。"
 };
 
+const PROFILE_COLORS = {
+  high_interaction_discuss: "#1f93ff",
+  high_frequency_active: "#20b274",
+  steady_viewer: "#f59f0b",
+  cross_platform_explorer: "#f97316",
+  like_driven: "#4f87ff",
+  light_browser: "#1fa4b8",
+  non_play_interactor: "#94a3b8",
+  unknown: "#7c8da6"
+};
+
 const profileLabelText = (label) => PROFILE_LABEL_TEXT[label] ?? "未分类";
+const profileColor = (label) => PROFILE_COLORS[label] ?? PROFILE_COLORS.unknown;
 
 const formatInt = (v) => Number(v ?? 0).toLocaleString("zh-CN");
 const formatDecimal = (v, n = 2) => Number(v ?? 0).toFixed(n);
@@ -311,18 +323,8 @@ const scatterOption = computed(() => ({
       },
       itemStyle: {
         color: (params) => {
-          const platform = String(params.value?.[4] ?? "").toLowerCase();
-          if (platform.includes("bilibili")) return "#38bdf8";
-          if (platform.includes("douyin")) return "#f97316";
-          if (platform.includes("kuaishou")) return "#ef4444";
-          if (platform.includes("xiaohongshu")) return "#ec4899";
-          if (platform.includes("xigua")) return "#f59e0b";
-          if (platform.includes("weibo")) return "#f43f5e";
-          if (platform.includes("youtube")) return "#dc2626";
-          if (platform.includes("tiktok")) return "#14b8a6";
-          if (platform.includes("acfun")) return "#6366f1";
-          if (platform.includes("seed")) return "#4f87ff";
-          return "#1f93ff";
+          const label = String(params.value?.[6] ?? "");
+          return profileColor(label);
         },
         opacity: 0.9
       }
@@ -332,7 +334,7 @@ const scatterOption = computed(() => ({
 
 const profilePieOption = computed(() => {
   const grouped = interestData.value.reduce((acc, item) => {
-    const key = profileLabelText(item.profileLabel);
+    const key = item.profileLabel || "unknown";
     acc[key] = (acc[key] ?? 0) + 1;
     return acc;
   }, {});
@@ -346,8 +348,11 @@ const profilePieOption = computed(() => {
         radius: ["38%", "68%"],
         center: ["50%", "44%"],
         label: { color: "#334155", formatter: "{b}: {d}%" },
-        data: Object.entries(grouped).map(([name, value]) => ({ name, value })),
-        color: ["#1f93ff", "#20b274", "#f59f0b", "#f97316", "#4f87ff", "#1fa4b8", "#94a3b8"]
+        data: Object.entries(grouped).map(([key, value]) => ({
+          name: profileLabelText(key),
+          value,
+          itemStyle: { color: profileColor(key) }
+        }))
       }
     ]
   };

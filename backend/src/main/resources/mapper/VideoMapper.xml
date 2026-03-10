@@ -371,21 +371,12 @@
                      WHERE ub.tenant_user_id = #{tenantUserId}) AS userCount,
                 </otherwise>
             </choose>
-            <choose>
-                <when test="platform != null and platform != ''">
-                    (SELECT COUNT(*)
-                     FROM comment c
-                     JOIN video v ON c.video_id = v.id
-                     WHERE c.tenant_user_id = #{tenantUserId}
-                       AND v.tenant_user_id = #{tenantUserId}
-                       AND COALESCE(v.source_platform, 'unknown') = #{platform}) AS commentCount,
-                </when>
-                <otherwise>
-                    (SELECT COUNT(*)
-                     FROM comment c
-                     WHERE c.tenant_user_id = #{tenantUserId}) AS commentCount,
-                </otherwise>
-            </choose>
+            (SELECT COALESCE(SUM(v.comment_count), 0)
+             FROM video v
+             WHERE v.tenant_user_id = #{tenantUserId}
+             <if test="platform != null and platform != ''">
+                 AND COALESCE(v.source_platform, 'unknown') = #{platform}
+             </if>) AS commentCount,
             <choose>
                 <when test="platform != null and platform != ''">
                     (SELECT COUNT(*)

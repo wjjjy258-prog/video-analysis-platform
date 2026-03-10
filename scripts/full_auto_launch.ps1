@@ -164,16 +164,12 @@ if ($frontendReady) {
     Write-Step "Frontend is already running"
 } else {
     Write-Step "Starting frontend"
-    if (Get-Command npm.cmd -ErrorAction SilentlyContinue) {
-        Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-File", "`"$frontendScript`""
-        $frontendReady = Wait-Url -Url $frontendUrl -MaxSeconds $FrontWaitSeconds
-        if ($frontendReady) {
-            Write-Step "Frontend is ready"
-        } else {
-            Write-Warning "Frontend start timeout. Check the frontend console window."
-        }
+    Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-File", "`"$frontendScript`""
+    $frontendReady = Wait-Url -Url $frontendUrl -MaxSeconds $FrontWaitSeconds
+    if ($frontendReady) {
+        Write-Step "Frontend is ready"
     } else {
-        Write-Warning "npm.cmd not found. Frontend was not started."
+        Write-Warning "Frontend start timeout. Check the frontend console window."
     }
 }
 
