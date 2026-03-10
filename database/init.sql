@@ -100,7 +100,8 @@ CREATE TABLE IF NOT EXISTS user_behavior (
   INDEX idx_behavior_time (time),
   INDEX idx_behavior_tenant_time (tenant_user_id, time),
   INDEX idx_behavior_tenant_video (tenant_user_id, video_id),
-  INDEX idx_behavior_tenant_user_action_time (tenant_user_id, user_id, action, time)
+  INDEX idx_behavior_tenant_user_action_time (tenant_user_id, user_id, action, time),
+  INDEX idx_behavior_tenant_user_video (tenant_user_id, user_id, video_id)
 );
 
 CREATE TABLE IF NOT EXISTS video_statistics (
@@ -160,6 +161,20 @@ CREATE TABLE IF NOT EXISTS import_reject_record (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_reject_tenant_time (tenant_user_id, import_time),
   INDEX idx_reject_tenant_job (tenant_user_id, import_job_id)
+);
+
+CREATE TABLE IF NOT EXISTS tenant_overview_cache (
+  tenant_user_id BIGINT NOT NULL,
+  source_platform VARCHAR(32) NOT NULL DEFAULT '__all__',
+  video_count BIGINT NOT NULL DEFAULT 0,
+  user_count BIGINT NOT NULL DEFAULT 0,
+  comment_count BIGINT NOT NULL DEFAULT 0,
+  behavior_count BIGINT NOT NULL DEFAULT 0,
+  total_play_count BIGINT NOT NULL DEFAULT 0,
+  source_platform_count INT NOT NULL DEFAULT 0,
+  refreshed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_user_id, source_platform),
+  INDEX idx_tenant_overview_refreshed (refreshed_at)
 );
 
 INSERT INTO app_user (id, username, password_hash, password_salt, created_at, updated_at)

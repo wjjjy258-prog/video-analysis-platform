@@ -127,7 +127,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
-import { getHotVideos, getInsightCards, getOverview, getPlatformStats } from "../api/video";
+import { getHomeDashboard, getHotVideos, getInsightCards, getOverview, getPlatformStats } from "../api/video";
 import ErrorPanel from "../components/ErrorPanel.vue";
 import LoadingPanel from "../components/LoadingPanel.vue";
 import { getErrorMessage } from "../utils/feedback";
@@ -227,6 +227,19 @@ const buildPartialError = (settledResults) => {
 };
 
 const fetchHomePayload = async () => {
+  try {
+    const dashboard = await getHomeDashboard(5);
+    return {
+      overview: dashboard?.overview ?? { ...EMPTY_OVERVIEW },
+      hotVideos: dashboard?.hotVideos ?? [],
+      platformStats: dashboard?.platformStats ?? [],
+      insightCards: dashboard?.insightCards ?? [],
+      loadError: ""
+    };
+  } catch (_dashboardError) {
+    // Backward compatibility fallback for older backend versions.
+  }
+
   const settledResults = await Promise.allSettled([
     getOverview(),
     getHotVideos(5),

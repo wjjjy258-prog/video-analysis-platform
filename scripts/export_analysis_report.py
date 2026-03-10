@@ -162,35 +162,35 @@ def write_summary_md(path: Path, data: dict) -> None:
     overview = data["overview"]
     platform = data["platform"]
     lines = [
-        "# 骞冲彴鍒嗘瀽瀵煎嚭鎶ュ憡",
+        "# 平台分析导出报告",
         "",
-        f"- 鐢熸垚鏃堕棿: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"- 瑙嗛鎬绘暟: {overview.get('video_count', 0)}",
-        f"- 鐢ㄦ埛鎬绘暟: {overview.get('user_count', 0)}",
-        f"- 琛屼负鏃ュ織鏁? {overview.get('behavior_count', 0)}",
-        f"- 瀵煎叆浠诲姟鏁? {overview.get('import_job_count', 0)}",
-        f"- 绱鎾斁閲? {overview.get('total_play_count', 0)}",
+        f"- 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"- 视频总数: {overview.get('video_count', 0)}",
+        f"- 用户总数: {overview.get('user_count', 0)}",
+        f"- 行为日志数: {overview.get('behavior_count', 0)}",
+        f"- 导入任务数: {overview.get('import_job_count', 0)}",
+        f"- 累计播放量: {overview.get('total_play_count', 0)}",
         "",
-        "## 骞冲彴鏁堢巼鎺掑悕锛堟瘡鍗冩挱鏀句簰鍔級",
+        "## 平台效率排名（每千播放互动）",
     ]
     for row in platform:
         lines.append(
             f"- {row.get('source_platform')}: {row.get('engagement_per_thousand_play')} "
-            f"(瑙嗛鏁?{row.get('video_count')}, 鎬绘挱鏀?{row.get('total_play')})"
+            f"(视频数:{row.get('video_count')}, 总播放:{row.get('total_play')})"
         )
     lines.append("")
-    lines.append("鎶ュ憡鍖呭惈 4 涓?CSV 鏂囦欢锛屽彲鐩存帴鐢ㄤ簬璁烘枃鍥捐〃鎴栫瓟杈╂潗鏂欍€?)
+    lines.append("报告包含 4 个 CSV 文件，可直接用于论文图表或答辩材料。")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="瀵煎嚭骞冲彴鍒嗘瀽鎶ュ憡涓?CSV + Markdown")
+    parser = argparse.ArgumentParser(description="Export platform analysis report (CSV + Markdown)")
     parser.add_argument("--mysql-host", default="localhost")
     parser.add_argument("--mysql-port", type=int, default=3306)
     parser.add_argument("--mysql-user", default="root")
     parser.add_argument("--mysql-password", default=os.getenv("MYSQL_PASSWORD", ""))
     parser.add_argument("--mysql-db", default="video_analysis")
-    parser.add_argument("--output-dir", default="", help="杈撳嚭鐩綍锛岄粯璁?analysis/reports")
+    parser.add_argument("--output-dir", default="", help="Output directory, default: analysis/reports")
     args = parser.parse_args()
 
     output_dir = ensure_output_dir(args.output_dir or None)

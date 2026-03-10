@@ -16,4 +16,7 @@ if (-not (Test-Path (Join-Path $frontendPath "node_modules"))) {
     }
 }
 
+# Force long-running crawler/import requests to avoid accidental 10s timeout from environment overrides.
+$env:VITE_API_TIMEOUT_MS = "0"
+
 npm.cmd run dev

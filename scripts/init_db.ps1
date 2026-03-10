@@ -17,7 +17,11 @@ if (-not (Test-Path $sqlPath)) {
 
 $mysqlCmd = Get-Command $MysqlExe -ErrorAction SilentlyContinue
 if ($null -ne $mysqlCmd) {
-    $command = "`"$MysqlExe`" -h $Host -P $Port -u $User -p$Password < `"$sqlPath`""
+    if ([string]::IsNullOrWhiteSpace($Password)) {
+        $command = "`"$MysqlExe`" -h $Host -P $Port -u $User < `"$sqlPath`""
+    } else {
+        $command = "`"$MysqlExe`" -h $Host -P $Port -u $User -p$Password < `"$sqlPath`""
+    }
     cmd /c $command
 
     if ($LASTEXITCODE -eq 0) {
@@ -37,7 +41,16 @@ if (-not (Test-Path $pythonInit)) {
     exit 1
 }
 
-python $pythonInit --host $Host --port $Port --user $User --password $Password --sql-file $sqlPath
+$pythonArgs = @(
+    "--host", $Host,
+    "--port", $Port,
+    "--user", $User,
+    "--sql-file", $sqlPath
+)
+if (-not [string]::IsNullOrWhiteSpace($Password)) {
+    $pythonArgs += @("--password", $Password)
+}
+python $pythonInit @pythonArgs
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Database init failed. Check MySQL service and credentials."

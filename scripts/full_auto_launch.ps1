@@ -94,6 +94,20 @@ function Stop-ListeningProcessOnPort([int]$Port, [string]$ServiceName) {
     Start-Sleep -Seconds 1
 }
 
+function Ensure-MySqlPassword([string]$CurrentPassword, [string]$UserName) {
+    if (-not [string]::IsNullOrWhiteSpace($CurrentPassword)) {
+        return $CurrentPassword
+    }
+    Write-Warning "MYSQL_PASSWORD is empty."
+    $secure = Read-Host "Please enter MySQL password for user '$UserName' (leave blank if no password)" -AsSecureString
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    try {
+        return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    } finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
+}
+
 Write-Step "Checking Python"
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
     throw "Python not found. Please install Python 3.10+."
@@ -105,8 +119,20 @@ if ($LASTEXITCODE -ne 0) {
     throw "Package install failed."
 }
 
+$MysqlPassword = Ensure-MySqlPassword -CurrentPassword $MysqlPassword -UserName $MysqlUser
+$env:MYSQL_USER = $MysqlUser
+$env:MYSQL_PASSWORD = $MysqlPassword
+
 Write-Step "Initializing database (without mysql CLI)"
-python $initScript --host $MysqlHost --port $MysqlPort --user $MysqlUser --password $MysqlPassword
+$initArgs = @(
+    "--host", $MysqlHost,
+    "--port", $MysqlPort,
+    "--user", $MysqlUser
+)
+if (-not [string]::IsNullOrWhiteSpace($MysqlPassword)) {
+    $initArgs += @("--password", $MysqlPassword)
+}
+python $initScript @initArgs
 if ($LASTEXITCODE -ne 0) {
     throw "Database initialization failed."
 }
@@ -156,7 +182,6 @@ $smokeArgs = @(
     "--mysql-host", $MysqlHost,
     "--mysql-port", $MysqlPort,
     "--mysql-user", $MysqlUser,
-    "--mysql-password", $MysqlPassword,
     "--mysql-db", $MysqlDb,
     "--api-base", "http://localhost:8080",
     "--api-timeout", $SmokeApiTimeoutSeconds,
@@ -165,6 +190,9 @@ $smokeArgs = @(
     "--auth-password", $AuthPassword,
     "--report-dir", $reportDir
 )
+if (-not [string]::IsNullOrWhiteSpace($MysqlPassword)) {
+    $smokeArgs += @("--mysql-password", $MysqlPassword)
+}
 if (-not $backendReady) {
     $smokeArgs += "--skip-api"
 }
@@ -178,7 +206,17 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Step "Exporting analysis report (CSV + MD)"
-python $exportScript --mysql-host $MysqlHost --mysql-port $MysqlPort --mysql-user $MysqlUser --mysql-password $MysqlPassword --mysql-db $MysqlDb --output-dir $reportDir
+$exportArgs = @(
+    "--mysql-host", $MysqlHost,
+    "--mysql-port", $MysqlPort,
+    "--mysql-user", $MysqlUser,
+    "--mysql-db", $MysqlDb,
+    "--output-dir", $reportDir
+)
+if (-not [string]::IsNullOrWhiteSpace($MysqlPassword)) {
+    $exportArgs += @("--mysql-password", $MysqlPassword)
+}
+python $exportScript @exportArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "Report export failed. You can run scripts\\export_analysis_report.py manually."
 }

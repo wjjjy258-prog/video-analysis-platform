@@ -19,6 +19,7 @@ import org.springframework.web.util.HtmlUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -29,6 +30,7 @@ public class VideoServiceImpl implements VideoService {
 
     private static final Pattern HTML_TAG_PATTERN = Pattern.compile("<[^>]+>");
     private static final Pattern MULTI_SPACE_PATTERN = Pattern.compile("\\s+");
+    private static final String OVERVIEW_CACHE_ALL = "__all__";
 
     private final VideoMapper videoMapper;
 
@@ -114,7 +116,7 @@ public class VideoServiceImpl implements VideoService {
     @Override
     public List<InsightCardVO> getInsightCards(String platform) {
         Long tenantUserId = AuthContext.requireUserId();
-        Map<String, Object> overview = videoMapper.selectOverview(tenantUserId, platform);
+        Map<String, Object> overview = loadOverview(tenantUserId, platform);
         List<PlatformBenchmarkVO> benchmark = videoMapper.selectPlatformBenchmark(tenantUserId, platform);
         List<FunnelStatVO> funnel = videoMapper.selectPlatformFunnel(tenantUserId, platform);
         List<SourceTraceVO> traces = videoMapper.selectSourceTrace(tenantUserId, 400, platform);
@@ -122,7 +124,44 @@ public class VideoServiceImpl implements VideoService {
 
         traces.forEach(this::sanitizeSourceTrace);
         hotTop1.forEach(this::sanitizeHotVideo);
+        return buildInsightCards(overview, benchmark, funnel, traces, hotTop1);
+    }
 
+    @Override
+    public Map<String, Object> getDashboard(Integer hotLimit, String platform) {
+        Long tenantUserId = AuthContext.requireUserId();
+        int limit = hotLimit == null ? 5 : Math.max(1, Math.min(20, hotLimit));
+
+        Map<String, Object> overview = loadOverview(tenantUserId, platform);
+        List<HotVideoVO> hotVideos = videoMapper.selectHotVideos(tenantUserId, limit, platform);
+        List<PlatformStatVO> platformStats = videoMapper.selectPlatformStats(tenantUserId, platform);
+        List<PlatformBenchmarkVO> benchmark = videoMapper.selectPlatformBenchmark(tenantUserId, platform);
+        List<FunnelStatVO> funnel = videoMapper.selectPlatformFunnel(tenantUserId, platform);
+        List<SourceTraceVO> traces = videoMapper.selectSourceTrace(tenantUserId, 400, platform);
+
+        hotVideos.forEach(this::sanitizeHotVideo);
+        traces.forEach(this::sanitizeSourceTrace);
+
+        List<HotVideoVO> hotTop1 = hotVideos.isEmpty()
+                ? List.of()
+                : List.of(hotVideos.get(0));
+        List<InsightCardVO> insightCards = buildInsightCards(overview, benchmark, funnel, traces, hotTop1);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("overview", overview);
+        result.put("hotVideos", hotVideos);
+        result.put("platformStats", platformStats);
+        result.put("insightCards", insightCards);
+        return result;
+    }
+
+    private List<InsightCardVO> buildInsightCards(
+            Map<String, Object> overview,
+            List<PlatformBenchmarkVO> benchmark,
+            List<FunnelStatVO> funnel,
+            List<SourceTraceVO> traces,
+            List<HotVideoVO> hotTop1
+    ) {
         List<InsightCardVO> cards = new ArrayList<>();
 
         long videoCount = asLong(overview.get("videoCount"));
@@ -185,7 +224,42 @@ public class VideoServiceImpl implements VideoService {
     @Override
     public Map<String, Object> getOverview(String platform) {
         Long tenantUserId = AuthContext.requireUserId();
-        return videoMapper.selectOverview(tenantUserId, platform);
+        return loadOverview(tenantUserId, platform);
+    }
+
+    private Map<String, Object> loadOverview(Long tenantUserId, String platform) {
+        String cachePlatform = (platform == null || platform.isBlank()) ? OVERVIEW_CACHE_ALL : platform;
+        Map<String, Object> cached = videoMapper.selectOverviewCache(tenantUserId, cachePlatform);
+        if (cached != null && !cached.isEmpty()) {
+            return cached;
+        }
+
+        Map<String, Object> live = videoMapper.selectOverviewLive(tenantUserId, platform);
+        if (live == null) {
+            live = new LinkedHashMap<>();
+        }
+        upsertOverviewCache(tenantUserId, cachePlatform, live);
+        return live;
+    }
+
+    private void upsertOverviewCache(Long tenantUserId, String cachePlatform, Map<String, Object> overview) {
+        long videoCount = asLong(overview.get("videoCount"));
+        long userCount = asLong(overview.get("userCount"));
+        long commentCount = asLong(overview.get("commentCount"));
+        long behaviorCount = asLong(overview.get("behaviorCount"));
+        long totalPlayCount = asLong(overview.get("totalPlayCount"));
+        int sourcePlatformCount = (int) Math.max(0, asLong(overview.get("sourcePlatformCount")));
+
+        videoMapper.upsertOverviewCache(
+                tenantUserId,
+                cachePlatform,
+                videoCount,
+                userCount,
+                commentCount,
+                behaviorCount,
+                totalPlayCount,
+                sourcePlatformCount
+        );
     }
 
     private String buildProfileInsight(String profileLabel) {

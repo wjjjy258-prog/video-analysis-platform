@@ -166,15 +166,15 @@ def write_reports(report_dir: Path, report: dict) -> dict:
     latest_json.write_text(json_text, encoding="utf-8")
 
     lines = [
-        "# 鑷祴鎶ュ憡",
+        "# 自测报告",
         "",
-        f"- 鏃堕棿: {report.get('runAt', '-')}",
-        f"- 缁撴灉: {report.get('status', '-')}",
+        f"- 时间: {report.get('runAt', '-')}",
+        f"- 结果: {report.get('status', '-')}",
         "",
-        "## 鏁版嵁搴?,
-        f"- 瑙嗛鏁? {report['db'].get('videoCount', 0)}",
-        f"- 琛屼负鏃ュ織鏁? {report['db'].get('behaviorCount', 0)}",
-        f"- 瀵煎叆浠诲姟鏁? {report['db'].get('importJobCount', 0)}",
+        "## 数据库",
+        f"- 视频数: {report['db'].get('videoCount', 0)}",
+        f"- 行为日志数: {report['db'].get('behaviorCount', 0)}",
+        f"- 导入任务数: {report['db'].get('importJobCount', 0)}",
         "",
         "## API",
     ]
@@ -201,7 +201,7 @@ def write_reports(report_dir: Path, report: dict) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="骞冲彴閮ㄧ讲鍚庤嚜娴嬭剼鏈紙鏃犻渶 mysql CLI锛?)
+    parser = argparse.ArgumentParser(description="Platform smoke test script (no mysql CLI required)")
     parser.add_argument("--mysql-host", default="localhost")
     parser.add_argument("--mysql-port", type=int, default=3306)
     parser.add_argument("--mysql-user", default="root")

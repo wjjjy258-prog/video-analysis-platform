@@ -14,6 +14,13 @@ export const getOverview = async (platform = "all") => {
   return data;
 };
 
+export const getHomeDashboard = async (hotLimit = 5, platform = "all") => {
+  const { data } = await http.get("/video/dashboard", {
+    params: { hotLimit, ...buildPlatformParams(platform) }
+  });
+  return data;
+};
+
 export const getHotVideos = async (limit = 10, platform = "all") => {
   const { data } = await http.get("/video/hot", { params: { limit, ...buildPlatformParams(platform) } });
   return data;
@@ -72,12 +79,18 @@ export const getInsightCards = async (platform = "all") => {
 };
 
 export const runCrawlerByUrls = async (payload) => {
-  const { data } = await http.post("/crawler/run-url", payload, { silentError: true });
+  const { data } = await http.post("/crawler/run-url", payload, {
+    silentError: true,
+    timeout: 0
+  });
   return data;
 };
 
 export const runCrawlerMock = async () => {
-  const { data } = await http.post("/crawler/run-mock", null, { silentError: true });
+  const { data } = await http.post("/crawler/run-mock", null, {
+    silentError: true,
+    timeout: 0
+  });
   return data;
 };
 
@@ -93,7 +106,10 @@ export const getImportRejects = async (limit = 50) => {
 };
 
 export const importCrawlerText = async (payload) => {
-  const { data } = await http.post("/crawler/import-text", payload, { silentError: true });
+  const { data } = await http.post("/crawler/import-text", payload, {
+    silentError: true,
+    timeout: 0
+  });
   return data;
 };
 
@@ -104,6 +120,7 @@ export const importCrawlerFile = async (file, defaultPlatform = "unknown", aiAss
   formData.append("aiAssist", String(Boolean(aiAssist)));
   const { data } = await http.post("/crawler/import-file", formData, {
     silentError: true,
+    timeout: 0,
     headers: {
       "Content-Type": "multipart/form-data"
     }

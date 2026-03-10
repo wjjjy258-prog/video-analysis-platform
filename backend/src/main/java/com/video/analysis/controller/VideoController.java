@@ -40,6 +40,14 @@ public class VideoController {
         return videoService.getOverview(normalizePlatform(platform));
     }
 
+    @GetMapping("/dashboard")
+    public Map<String, Object> dashboard(
+            @RequestParam(defaultValue = "5") @Min(1) @Max(20) Integer hotLimit,
+            @RequestParam(required = false) String platform
+    ) {
+        return videoService.getDashboard(hotLimit, normalizePlatform(platform));
+    }
+
     @GetMapping("/hot")
     public List<HotVideoVO> hotVideos(
             @RequestParam(defaultValue = "10") @Min(1) @Max(100) Integer limit,

@@ -93,7 +93,7 @@ def pre_upgrade_schema(cursor) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="鍒濆鍖?video_analysis 鏁版嵁搴擄紙鏃犻渶 mysql CLI锛?)
+    parser = argparse.ArgumentParser(description="Initialize video_analysis database without mysql CLI")
     parser.add_argument("--host", default=os.getenv("MYSQL_HOST", "localhost"))
     parser.add_argument("--port", type=int, default=int(os.getenv("MYSQL_PORT", "3306")))
     parser.add_argument("--user", default=os.getenv("MYSQL_USER", "root"))
@@ -103,12 +103,12 @@ def main() -> None:
 
     sql_path = Path(args.sql_file)
     if not sql_path.exists():
-        raise FileNotFoundError(f"SQL 鏂囦欢涓嶅瓨鍦? {sql_path}")
+        raise FileNotFoundError(f"SQL file not found: {sql_path}")
 
     sql_text = sql_path.read_text(encoding="utf-8")
     statements = split_sql_statements(sql_text)
     if not statements:
-        print("鏈В鏋愬埌 SQL 璇彞銆?)
+        print("No SQL statements parsed.")
         return
 
     conn = mysql.connector.connect(
@@ -127,7 +127,7 @@ def main() -> None:
         for stmt in statements:
             cursor.execute(stmt)
         conn.commit()
-        print(f"鏁版嵁搴撳垵濮嬪寲鎴愬姛锛屾墽琛岃鍙ユ暟: {len(statements)}")
+        print(f"Database initialized successfully, executed statements: {len(statements)}")
     finally:
         conn.close()
 

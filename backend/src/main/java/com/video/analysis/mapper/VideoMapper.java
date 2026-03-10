@@ -39,5 +39,18 @@ public interface VideoMapper {
 
     List<SourceTraceVO> selectSourceTrace(@Param("tenantUserId") Long tenantUserId, @Param("limit") Integer limit, @Param("platform") String platform);
 
-    Map<String, Object> selectOverview(@Param("tenantUserId") Long tenantUserId, @Param("platform") String platform);
+    Map<String, Object> selectOverviewCache(@Param("tenantUserId") Long tenantUserId, @Param("cachePlatform") String cachePlatform);
+
+    Map<String, Object> selectOverviewLive(@Param("tenantUserId") Long tenantUserId, @Param("platform") String platform);
+
+    int upsertOverviewCache(
+            @Param("tenantUserId") Long tenantUserId,
+            @Param("cachePlatform") String cachePlatform,
+            @Param("videoCount") Long videoCount,
+            @Param("userCount") Long userCount,
+            @Param("commentCount") Long commentCount,
+            @Param("behaviorCount") Long behaviorCount,
+            @Param("totalPlayCount") Long totalPlayCount,
+            @Param("sourcePlatformCount") Integer sourcePlatformCount
+    );
 }

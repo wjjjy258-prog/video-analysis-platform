@@ -96,6 +96,12 @@ public class CrawlerServiceImpl implements CrawlerService {
     @Value("${crawler.import.dedupe-query-batch-size:2000}")
     private int dedupeQueryBatchSize;
 
+    @Value("${crawler.import.behavior-scale:1.0}")
+    private double behaviorScale;
+
+    @Value("${crawler.import.behavior-max-rows-per-import:300000}")
+    private int behaviorMaxRowsPerImport;
+
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final AiImportExtractor aiImportExtractor;
@@ -149,7 +155,6 @@ public class CrawlerServiceImpl implements CrawlerService {
     }
 
     @Override
-    @Transactional
     public CrawlRunResponse clearTenantData(boolean confirm) {
         if (!confirm) {
             throw new IllegalArgumentException("Clearing data requires explicit confirmation.");
@@ -158,23 +163,15 @@ public class CrawlerServiceImpl implements CrawlerService {
         long tenantUserId = AuthContext.requireUserId();
         LocalDateTime start = LocalDateTime.now();
 
-        long beforeVideo = countByTenant("video", tenantUserId);
-        long beforeBehavior = countByTenant("user_behavior", tenantUserId);
-        long beforeUser = countByTenant("`user`", tenantUserId);
-        long beforeComment = countByTenant("comment", tenantUserId);
-        long beforeStat = countByTenant("video_statistics", tenantUserId);
-        long beforeInterest = countByTenant("user_interest_result", tenantUserId);
-        long beforeImportJob = countByTenant("import_job", tenantUserId);
-        long beforeReject = countByTenant("import_reject_record", tenantUserId);
-
-        int deletedBehavior = jdbcTemplate.update("DELETE FROM user_behavior WHERE tenant_user_id=?", tenantUserId);
+        int deletedBehavior = deleteByTenantInChunks("user_behavior", tenantUserId, 50_000);
         int deletedComment = jdbcTemplate.update("DELETE FROM comment WHERE tenant_user_id=?", tenantUserId);
         int deletedStat = jdbcTemplate.update("DELETE FROM video_statistics WHERE tenant_user_id=?", tenantUserId);
         int deletedInterest = jdbcTemplate.update("DELETE FROM user_interest_result WHERE tenant_user_id=?", tenantUserId);
         int deletedVideo = jdbcTemplate.update("DELETE FROM video WHERE tenant_user_id=?", tenantUserId);
         int deletedUser = jdbcTemplate.update("DELETE FROM `user` WHERE tenant_user_id=?", tenantUserId);
-        int deletedImportJob = jdbcTemplate.update("DELETE FROM import_job WHERE tenant_user_id=?", tenantUserId);
         int deletedReject = jdbcTemplate.update("DELETE FROM import_reject_record WHERE tenant_user_id=?", tenantUserId);
+        int deletedImportJob = jdbcTemplate.update("DELETE FROM import_job WHERE tenant_user_id=?", tenantUserId);
+        invalidateOverviewCache(tenantUserId);
 
         CrawlRunResponse response = new CrawlRunResponse();
         response.setStartedAt(start);
@@ -183,16 +180,7 @@ public class CrawlerServiceImpl implements CrawlerService {
         response.setExitCode(0);
         response.setMessage("Tenant data cleared successfully.");
         response.setOutput(
-                "before: video=" + beforeVideo +
-                        ", user_behavior=" + beforeBehavior +
-                        ", user=" + beforeUser +
-                        ", comment=" + beforeComment +
-                        ", video_statistics=" + beforeStat +
-                        ", user_interest_result=" + beforeInterest +
-                        ", import_job=" + beforeImportJob +
-                        ", import_reject_record=" + beforeReject +
-                        System.lineSeparator() +
-                        "deleted: video=" + deletedVideo +
+                "deleted: video=" + deletedVideo +
                         ", user_behavior=" + deletedBehavior +
                         ", user=" + deletedUser +
                         ", comment=" + deletedComment +
@@ -341,13 +329,36 @@ public class CrawlerServiceImpl implements CrawlerService {
         return badGb < badUtf8 ? gb18030 : utf8;
     }
 
-    private long countByTenant(String tableName, long tenantUserId) {
-        Long count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(1) FROM " + tableName + " WHERE tenant_user_id=?",
-                Long.class,
-                tenantUserId
+    private int deleteByTenantInChunks(String tableName, long tenantUserId, int chunkSize) {
+        int safeChunk = Math.max(5_000, chunkSize);
+        int total = 0;
+        while (true) {
+            int deleted = jdbcTemplate.update(
+                    "DELETE FROM " + tableName + " WHERE tenant_user_id=? LIMIT " + safeChunk,
+                    tenantUserId
+            );
+            total += deleted;
+            if (deleted < safeChunk) {
+                break;
+            }
+        }
+        return total;
+    }
+
+    private void invalidateOverviewCache(long tenantUserId) {
+        if (!tableExists("tenant_overview_cache")) {
+            return;
+        }
+        jdbcTemplate.update("DELETE FROM tenant_overview_cache WHERE tenant_user_id=?", tenantUserId);
+    }
+
+    private boolean tableExists(String tableName) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
+                Integer.class,
+                tableName
         );
-        return count == null ? 0L : count;
+        return count != null && count > 0;
     }
 
     private int countBadChar(String text) {
@@ -1529,6 +1540,7 @@ public class CrawlerServiceImpl implements CrawlerService {
                         + ",new=" + newVideoRows
                         + ",updated=" + updatedVideoRows
         );
+        invalidateOverviewCache(tenantUserId);
 
         return new ImportResult(
                 acceptedRows.size(),
@@ -1632,6 +1644,8 @@ public class CrawlerServiceImpl implements CrawlerService {
         long nowEpoch = Instant.now().getEpochSecond();
         int batchSize = safeBatchSize(behaviorBatchSize, 5000);
         String behaviorSql = "INSERT INTO user_behavior (tenant_user_id,user_id,video_id,action,time) VALUES (?,?,?,?,?)";
+        double scaledFactor = Math.max(0D, behaviorScale);
+        int maxRows = behaviorMaxRowsPerImport > 0 ? behaviorMaxRowsPerImport : Integer.MAX_VALUE;
 
         return jdbcTemplate.execute((ConnectionCallback<Integer>) connection -> {
             int totalInserted = 0;
@@ -1642,12 +1656,31 @@ public class CrawlerServiceImpl implements CrawlerService {
                     if (row.existingBefore) {
                         continue;
                     }
+                    if (totalInserted + pending >= maxRows) {
+                        break;
+                    }
 
                     // Generate synthetic behavior density from content popularity.
-                    int play = Math.max(4, Math.min(80, (int) Math.sqrt(Math.max(1, row.playCount) / 800.0) + 4));
-                    int like = Math.max(1, Math.min(35, (int) Math.sqrt(Math.max(1, row.likeCount) / 200.0) + 1));
-                    int comment = Math.max(1, Math.min(20, (int) Math.sqrt(Math.max(1, row.commentCount) / 120.0)));
-                    int total = Math.min(150, play + like + comment);
+                    // Keep enough distribution for user profiling while avoiding million-row writes per import.
+                    int play = estimatePlayActions(row.playCount);
+                    int like = estimateLikeActions(row.likeCount);
+                    int comment = estimateCommentActions(row.commentCount);
+                    if (scaledFactor != 1.0D) {
+                        play = scaleBehaviorCount(play, scaledFactor);
+                        like = scaleBehaviorCount(like, scaledFactor);
+                        comment = scaleBehaviorCount(comment, scaledFactor);
+                    }
+                    int total = Math.min(60, play + like + comment);
+                    int remaining = maxRows - totalInserted - pending;
+                    if (remaining <= 0) {
+                        break;
+                    }
+                    if (total > remaining) {
+                        total = remaining;
+                    }
+                    if (total <= 0) {
+                        continue;
+                    }
 
                     long fromEpoch = row.publishTime.atZone(ZoneId.systemDefault()).toEpochSecond();
                     if (fromEpoch >= nowEpoch) {
@@ -1670,7 +1703,13 @@ public class CrawlerServiceImpl implements CrawlerService {
                         if (pending >= batchSize) {
                             totalInserted += countAffected(ps.executeBatch());
                             pending = 0;
+                            if (totalInserted >= maxRows) {
+                                break;
+                            }
                         }
+                    }
+                    if (totalInserted >= maxRows) {
+                        break;
                     }
                 }
 
@@ -1680,6 +1719,32 @@ public class CrawlerServiceImpl implements CrawlerService {
             }
             return totalInserted;
         });
+    }
+
+    private int scaleBehaviorCount(int baseCount, double factor) {
+        if (baseCount <= 0 || factor <= 0D) {
+            return 0;
+        }
+        return (int) Math.max(0L, Math.round(baseCount * factor));
+    }
+
+    private int estimatePlayActions(long playCount) {
+        int raw = (int) Math.round(Math.log10(Math.max(1D, playCount) + 9D) * 6D);
+        return clampInt(raw, 2, 24);
+    }
+
+    private int estimateLikeActions(long likeCount) {
+        int raw = (int) Math.round(Math.log10(Math.max(1D, likeCount) + 9D) * 4D);
+        return clampInt(raw, 1, 12);
+    }
+
+    private int estimateCommentActions(long commentCount) {
+        int raw = (int) Math.round(Math.log10(Math.max(1D, commentCount) + 9D) * 3D);
+        return clampInt(raw, 1, 8);
+    }
+
+    private int clampInt(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     private int countAffected(int[] results) {
@@ -1874,6 +1939,7 @@ public class CrawlerServiceImpl implements CrawlerService {
 
     private record ParseResult(List<VideoRow> rows, int dedupedRecords) {
     }
+
 }
 
 

@@ -82,13 +82,15 @@ public class CrawlerController {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<CrawlRunResponse> handleOtherExceptions(Exception ex) {
-        // Keep detailed stack in server logs, but avoid leaking internals to clients.
+        // Keep detailed stack in server logs while returning concise error to UI.
         log.error("Unexpected crawler request failure", ex);
         CrawlRunResponse response = new CrawlRunResponse();
         response.setSuccess(false);
         response.setExitCode(1);
-        response.setMessage("执行失败，请检查输入格式后重试。");
-        response.setOutput("");
+        response.setMessage("执行失败，请检查输入后重试。");
+        String type = ex.getClass().getSimpleName();
+        String detail = ex.getMessage() == null ? "" : ex.getMessage();
+        response.setOutput((type + (detail.isBlank() ? "" : (": " + detail))).trim());
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
     }
 

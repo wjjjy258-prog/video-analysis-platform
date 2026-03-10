@@ -40,4 +40,6 @@ public interface VideoService {
     List<InsightCardVO> getInsightCards(String platform);
 
     Map<String, Object> getOverview(String platform);
+
+    Map<String, Object> getDashboard(Integer hotLimit, String platform);
 }

@@ -7,6 +7,11 @@ import org.springframework.stereotype.Component;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @Component
 public class SchemaUpgradeRunner implements CommandLineRunner {
@@ -25,6 +30,7 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
 
         ensureImportJobTable(seedUserId);
         ensureImportRejectTable(seedUserId);
+        ensureOverviewCacheTable();
         ensureTenantColumns(seedUserId);
         ensureVideoColumns(seedUserId);
 
@@ -33,6 +39,7 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
         remapOrphanTenants(seedUserId);
         purgeLegacySeedData(seedUserId);
         ensureVideoIndexes();
+        rebuildOverviewCacheForAllTenants();
     }
 
     private void ensureAuthTables() {
@@ -172,6 +179,24 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
         addColumnIfMissing("import_reject_record", "ai_used", "TINYINT(1) NOT NULL DEFAULT 0 AFTER quality_score");
         addColumnIfMissing("import_reject_record", "ai_confidence", "DECIMAL(5,4) NOT NULL DEFAULT 0.0000 AFTER ai_used");
         addColumnIfMissing("import_reject_record", "import_time", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER ai_confidence");
+    }
+
+    private void ensureOverviewCacheTable() {
+        jdbcTemplate.execute(
+                "CREATE TABLE IF NOT EXISTS tenant_overview_cache (" +
+                        "tenant_user_id BIGINT NOT NULL," +
+                        "source_platform VARCHAR(32) NOT NULL DEFAULT '__all__'," +
+                        "video_count BIGINT NOT NULL DEFAULT 0," +
+                        "user_count BIGINT NOT NULL DEFAULT 0," +
+                        "comment_count BIGINT NOT NULL DEFAULT 0," +
+                        "behavior_count BIGINT NOT NULL DEFAULT 0," +
+                        "total_play_count BIGINT NOT NULL DEFAULT 0," +
+                        "source_platform_count INT NOT NULL DEFAULT 0," +
+                        "refreshed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP," +
+                        "PRIMARY KEY (tenant_user_id, source_platform)," +
+                        "INDEX idx_tenant_overview_refreshed (refreshed_at)" +
+                        ")"
+        );
     }
 
     private void backfillVideoData(long seedUserId) {
@@ -375,6 +400,9 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
         if (!indexExists("user_behavior", "idx_behavior_tenant_user_action_time")) {
             jdbcTemplate.execute("CREATE INDEX idx_behavior_tenant_user_action_time ON user_behavior(tenant_user_id, user_id, action, time)");
         }
+        if (!indexExists("user_behavior", "idx_behavior_tenant_user_video")) {
+            jdbcTemplate.execute("CREATE INDEX idx_behavior_tenant_user_video ON user_behavior(tenant_user_id, user_id, video_id)");
+        }
         if (!indexExists("comment", "idx_comment_tenant")) {
             jdbcTemplate.execute("CREATE INDEX idx_comment_tenant ON comment(tenant_user_id)");
         }
@@ -390,6 +418,167 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
         if (!indexExists("import_reject_record", "idx_reject_tenant_job")) {
             jdbcTemplate.execute("CREATE INDEX idx_reject_tenant_job ON import_reject_record(tenant_user_id, import_job_id)");
         }
+        if (!indexExists("tenant_overview_cache", "idx_tenant_overview_refreshed")) {
+            jdbcTemplate.execute("CREATE INDEX idx_tenant_overview_refreshed ON tenant_overview_cache(refreshed_at)");
+        }
+    }
+
+    private void rebuildOverviewCacheForAllTenants() {
+        if (!tableExists("tenant_overview_cache")) {
+            return;
+        }
+        Set<Long> tenantIds = new LinkedHashSet<>();
+        List<Long> fromUser = jdbcTemplate.queryForList("SELECT id FROM app_user", Long.class);
+        tenantIds.addAll(fromUser);
+        if (tableExists("video")) {
+            List<Long> fromVideo = jdbcTemplate.queryForList("SELECT DISTINCT tenant_user_id FROM video", Long.class);
+            tenantIds.addAll(fromVideo);
+        }
+        for (Long tenantUserId : tenantIds) {
+            if (tenantUserId != null && tenantUserId > 0) {
+                rebuildOverviewCacheForTenant(tenantUserId);
+            }
+        }
+    }
+
+    private void rebuildOverviewCacheForTenant(long tenantUserId) {
+        long videoCount = queryLongValue("SELECT COUNT(*) FROM video WHERE tenant_user_id=?", tenantUserId);
+        long userCount = queryLongValue("SELECT COUNT(DISTINCT user_id) FROM user_behavior WHERE tenant_user_id=?", tenantUserId);
+        long commentCount = queryLongValue("SELECT COUNT(*) FROM comment WHERE tenant_user_id=?", tenantUserId);
+        long behaviorCount = queryLongValue("SELECT COUNT(*) FROM user_behavior WHERE tenant_user_id=?", tenantUserId);
+        long totalPlayCount = queryLongValue("SELECT COALESCE(SUM(play_count), 0) FROM video WHERE tenant_user_id=?", tenantUserId);
+        int sourcePlatformCount = (int) queryLongValue(
+                "SELECT COUNT(DISTINCT COALESCE(source_platform, 'unknown')) FROM video WHERE tenant_user_id=?",
+                tenantUserId
+        );
+
+        upsertOverviewCacheRow(
+                tenantUserId,
+                "__all__",
+                videoCount,
+                userCount,
+                commentCount,
+                behaviorCount,
+                totalPlayCount,
+                sourcePlatformCount
+        );
+
+        Map<String, OverviewCounter> perPlatform = new LinkedHashMap<>();
+        List<Map<String, Object>> videoRows = jdbcTemplate.queryForList(
+                "SELECT COALESCE(source_platform, 'unknown') AS source_platform, COUNT(*) AS video_count, COALESCE(SUM(play_count), 0) AS total_play " +
+                        "FROM video WHERE tenant_user_id=? GROUP BY COALESCE(source_platform, 'unknown')",
+                tenantUserId
+        );
+        for (Map<String, Object> row : videoRows) {
+            String platform = normalizePlatformKey(row.get("source_platform"));
+            OverviewCounter counter = perPlatform.computeIfAbsent(platform, key -> new OverviewCounter());
+            counter.videoCount = asLongNumber(row.get("video_count"));
+            counter.totalPlayCount = asLongNumber(row.get("total_play"));
+        }
+
+        List<Map<String, Object>> behaviorRows = jdbcTemplate.queryForList(
+                "SELECT COALESCE(v.source_platform, 'unknown') AS source_platform, COUNT(*) AS behavior_count, COUNT(DISTINCT ub.user_id) AS user_count " +
+                        "FROM user_behavior ub JOIN video v ON ub.video_id=v.id " +
+                        "WHERE ub.tenant_user_id=? AND v.tenant_user_id=? " +
+                        "GROUP BY COALESCE(v.source_platform, 'unknown')",
+                tenantUserId,
+                tenantUserId
+        );
+        for (Map<String, Object> row : behaviorRows) {
+            String platform = normalizePlatformKey(row.get("source_platform"));
+            OverviewCounter counter = perPlatform.computeIfAbsent(platform, key -> new OverviewCounter());
+            counter.behaviorCount = asLongNumber(row.get("behavior_count"));
+            counter.userCount = asLongNumber(row.get("user_count"));
+        }
+
+        List<Map<String, Object>> commentRows = jdbcTemplate.queryForList(
+                "SELECT COALESCE(v.source_platform, 'unknown') AS source_platform, COUNT(*) AS comment_count " +
+                        "FROM comment c JOIN video v ON c.video_id=v.id " +
+                        "WHERE c.tenant_user_id=? AND v.tenant_user_id=? " +
+                        "GROUP BY COALESCE(v.source_platform, 'unknown')",
+                tenantUserId,
+                tenantUserId
+        );
+        for (Map<String, Object> row : commentRows) {
+            String platform = normalizePlatformKey(row.get("source_platform"));
+            OverviewCounter counter = perPlatform.computeIfAbsent(platform, key -> new OverviewCounter());
+            counter.commentCount = asLongNumber(row.get("comment_count"));
+        }
+
+        jdbcTemplate.update(
+                "DELETE FROM tenant_overview_cache WHERE tenant_user_id=? AND source_platform<>'__all__'",
+                tenantUserId
+        );
+        for (Map.Entry<String, OverviewCounter> entry : perPlatform.entrySet()) {
+            OverviewCounter counter = entry.getValue();
+            upsertOverviewCacheRow(
+                    tenantUserId,
+                    entry.getKey(),
+                    counter.videoCount,
+                    counter.userCount,
+                    counter.commentCount,
+                    counter.behaviorCount,
+                    counter.totalPlayCount,
+                    counter.videoCount > 0 ? 1 : 0
+            );
+        }
+    }
+
+    private void upsertOverviewCacheRow(
+            long tenantUserId,
+            String sourcePlatform,
+            long videoCount,
+            long userCount,
+            long commentCount,
+            long behaviorCount,
+            long totalPlayCount,
+            int sourcePlatformCount
+    ) {
+        jdbcTemplate.update(
+                "INSERT INTO tenant_overview_cache " +
+                        "(tenant_user_id, source_platform, video_count, user_count, comment_count, behavior_count, total_play_count, source_platform_count, refreshed_at) " +
+                        "VALUES (?,?,?,?,?,?,?,?,?) " +
+                        "ON DUPLICATE KEY UPDATE " +
+                        "video_count=VALUES(video_count), user_count=VALUES(user_count), comment_count=VALUES(comment_count), " +
+                        "behavior_count=VALUES(behavior_count), total_play_count=VALUES(total_play_count), source_platform_count=VALUES(source_platform_count), " +
+                        "refreshed_at=VALUES(refreshed_at)",
+                tenantUserId,
+                normalizePlatformKey(sourcePlatform),
+                Math.max(0L, videoCount),
+                Math.max(0L, userCount),
+                Math.max(0L, commentCount),
+                Math.max(0L, behaviorCount),
+                Math.max(0L, totalPlayCount),
+                Math.max(0, sourcePlatformCount),
+                Timestamp.valueOf(LocalDateTime.now())
+        );
+    }
+
+    private long queryLongValue(String sql, Object... args) {
+        Long value = jdbcTemplate.queryForObject(sql, Long.class, args);
+        return value == null ? 0L : value;
+    }
+
+    private long asLongNumber(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value == null) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (Exception ex) {
+            return 0L;
+        }
+    }
+
+    private String normalizePlatformKey(Object value) {
+        String platform = value == null ? "unknown" : String.valueOf(value).trim().toLowerCase();
+        if (platform.isBlank()) {
+            platform = "unknown";
+        }
+        return platform.length() <= 32 ? platform : platform.substring(0, 32);
     }
 
     private void addColumnIfMissing(String tableName, String columnName, String columnDefinition) {
@@ -434,5 +623,13 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
                 tableName
         );
         return count != null && count > 0;
+    }
+
+    private static class OverviewCounter {
+        long videoCount;
+        long userCount;
+        long commentCount;
+        long behaviorCount;
+        long totalPlayCount;
     }
 }

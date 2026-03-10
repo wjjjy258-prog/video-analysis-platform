@@ -45,4 +45,6 @@ crawler:
     video-batch-size: 1000
     user-batch-size: 1000
     behavior-batch-size: 5000
+    behavior-scale: ${CRAWLER_BEHAVIOR_SCALE:0.35}
+    behavior-max-rows-per-import: ${CRAWLER_BEHAVIOR_MAX_ROWS:300000}
     dedupe-query-batch-size: 2000
