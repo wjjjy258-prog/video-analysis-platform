@@ -178,50 +178,86 @@
                      AND COALESCE(v.source_platform, 'unknown') = #{platform}
                  </if>
                  GROUP BY ub.user_id
+             ),
+             user_metric AS (
+                 SELECT tu.user_id AS user_id,
+                        tu.action_count AS action_count,
+                        tu.play_count AS play_count,
+                        tu.like_count AS like_count,
+                        tu.comment_action_count AS comment_action_count,
+                        tu.active_days AS active_days,
+                        tu.last_active_time AS last_active_time,
+                        CASE WHEN tu.active_days = 0 THEN 0
+                             ELSE tu.action_count / NULLIF(tu.active_days, 0)
+                             END AS avg_daily_actions,
+                        CASE WHEN tu.play_count = 0 THEN 0
+                             ELSE tu.like_count / NULLIF(tu.play_count, 0)
+                             END AS like_rate,
+                        CASE WHEN tu.play_count = 0 THEN 0
+                             ELSE tu.comment_action_count / NULLIF(tu.play_count, 0)
+                             END AS comment_rate,
+                        CASE WHEN tu.play_count = 0 THEN 0
+                             ELSE (tu.like_count + tu.comment_action_count) / NULLIF(tu.play_count, 0)
+                             END AS interaction_rate
+                 FROM top_users tu
+             ),
+             user_rank AS (
+                 SELECT um.user_id AS user_id,
+                        um.action_count AS action_count,
+                        um.play_count AS play_count,
+                        um.like_count AS like_count,
+                        um.comment_action_count AS comment_action_count,
+                        um.active_days AS active_days,
+                        um.last_active_time AS last_active_time,
+                        um.avg_daily_actions AS avg_daily_actions,
+                        um.like_rate AS like_rate,
+                        um.comment_rate AS comment_rate,
+                        um.interaction_rate AS interaction_rate,
+                        PERCENT_RANK() OVER (ORDER BY um.action_count) AS action_percentile,
+                        PERCENT_RANK() OVER (ORDER BY um.avg_daily_actions) AS avg_daily_percentile,
+                        PERCENT_RANK() OVER (ORDER BY um.like_rate) AS like_percentile,
+                        PERCENT_RANK() OVER (ORDER BY um.comment_rate) AS comment_percentile,
+                        PERCENT_RANK() OVER (ORDER BY um.interaction_rate) AS interaction_percentile
+                 FROM user_metric um
              )
-        SELECT tu.user_id AS user_id,
-               COALESCE(u.user_name, CONCAT('user_', tu.user_id)) AS user_name,
-               tu.action_count AS action_count,
-               tu.play_count AS play_count,
-               tu.like_count AS like_count,
-               tu.comment_action_count AS comment_action_count,
+        SELECT ur.user_id AS user_id,
+               COALESCE(u.user_name, CONCAT('user_', ur.user_id)) AS user_name,
+               ur.action_count AS action_count,
+               ur.play_count AS play_count,
+               ur.like_count AS like_count,
+               ur.comment_action_count AS comment_action_count,
                COALESCE(uc.category, 'unknown') AS favorite_category,
                COALESCE(up.source_platform, 'unknown') AS favorite_platform,
                COALESCE(ud.category_diversity, 0) AS category_diversity,
                COALESCE(ud.platform_diversity, 0) AS platform_diversity,
-               tu.active_days AS active_days,
-               tu.last_active_time AS last_active_time,
-               ROUND(CASE WHEN tu.active_days = 0 THEN 0
-                          ELSE tu.action_count / tu.active_days
-                          END, 2) AS avg_daily_actions,
-               ROUND(CASE WHEN tu.play_count = 0 THEN 0
-                          ELSE tu.like_count / tu.play_count
-                          END, 6) AS like_rate,
-               ROUND(CASE WHEN tu.play_count = 0 THEN 0
-                          ELSE tu.comment_action_count / tu.play_count
-                          END, 6) AS comment_rate,
-               ROUND(CASE WHEN tu.play_count = 0 THEN 0
-                          ELSE (tu.like_count + tu.comment_action_count) / tu.play_count
-                          END, 6) AS interaction_rate,
+               ur.active_days AS active_days,
+               ur.last_active_time AS last_active_time,
+               ROUND(ur.avg_daily_actions, 2) AS avg_daily_actions,
+               ROUND(ur.like_rate, 6) AS like_rate,
+               ROUND(ur.comment_rate, 6) AS comment_rate,
+               ROUND(ur.interaction_rate, 6) AS interaction_rate,
                CASE
-                   WHEN tu.action_count &lt; 5 THEN 'light_browser'
-                   WHEN tu.play_count = 0 THEN 'non_play_interactor'
-                   WHEN (tu.like_count + tu.comment_action_count) / NULLIF(tu.play_count, 0) &gt;= 0.30
-                       AND tu.comment_action_count / NULLIF(tu.play_count, 0) &gt;= 0.06 THEN 'high_interaction_discuss'
+                   WHEN ur.action_count &lt; 5 THEN 'light_browser'
+                   WHEN ur.play_count = 0 THEN 'non_play_interactor'
                    WHEN COALESCE(ud.category_diversity, 0) &gt;= 6
                        AND COALESCE(ud.platform_diversity, 0) &gt;= 2 THEN 'cross_platform_explorer'
-                   WHEN tu.active_days &gt;= 15
-                       AND tu.action_count / NULLIF(tu.active_days, 0) &gt;= 6 THEN 'high_frequency_active'
-                   WHEN tu.like_count / NULLIF(tu.play_count, 0) &gt;= 0.12
-                       AND tu.comment_action_count / NULLIF(tu.play_count, 0) &lt; 0.04 THEN 'like_driven'
+                   WHEN ur.action_percentile &gt;= 0.90
+                       AND ur.interaction_rate &gt;= 0.25
+                       AND ur.comment_rate &gt;= 0.05 THEN 'high_interaction_discuss'
+                   WHEN ur.avg_daily_percentile &gt;= 0.75
+                       AND ur.action_count &gt;= 12 THEN 'high_frequency_active'
+                   WHEN ur.like_rate &gt;= 0.10
+                       AND ur.comment_rate &lt; 0.035 THEN 'like_driven'
+                   WHEN ur.interaction_percentile &gt;= 0.80
+                       AND ur.comment_percentile &gt;= 0.70 THEN 'high_interaction_discuss'
                    ELSE 'steady_viewer'
                    END AS profile_label
-        FROM top_users tu
-        LEFT JOIN `user` u ON tu.user_id = u.user_id AND u.tenant_user_id = #{tenantUserId}
-        LEFT JOIN user_category uc ON tu.user_id = uc.user_id AND uc.rn = 1
-        LEFT JOIN user_platform up ON tu.user_id = up.user_id AND up.rn = 1
-        LEFT JOIN user_diversity ud ON tu.user_id = ud.user_id
-        ORDER BY tu.action_count DESC, tu.user_id ASC
+        FROM user_rank ur
+        LEFT JOIN `user` u ON ur.user_id = u.user_id AND u.tenant_user_id = #{tenantUserId}
+        LEFT JOIN user_category uc ON ur.user_id = uc.user_id AND uc.rn = 1
+        LEFT JOIN user_platform up ON ur.user_id = up.user_id AND up.rn = 1
+        LEFT JOIN user_diversity ud ON ur.user_id = ud.user_id
+        ORDER BY ur.action_count DESC, ur.user_id ASC
     </select>
 
     <select id="selectPlatformStats" resultType="com.video.analysis.dto.PlatformStatVO">

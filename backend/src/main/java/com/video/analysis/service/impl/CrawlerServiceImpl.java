@@ -1660,16 +1660,12 @@ public class CrawlerServiceImpl implements CrawlerService {
                         break;
                     }
 
-                    // Generate synthetic behavior density from content popularity.
-                    // Keep enough distribution for user profiling while avoiding million-row writes per import.
-                    int play = estimatePlayActions(row.playCount);
-                    int like = estimateLikeActions(row.likeCount);
-                    int comment = estimateCommentActions(row.commentCount);
-                    if (scaledFactor != 1.0D) {
-                        play = scaleBehaviorCount(play, scaledFactor);
-                        like = scaleBehaviorCount(like, scaledFactor);
-                        comment = scaleBehaviorCount(comment, scaledFactor);
-                    }
+                    // Generate synthetic actions with diversified behavior profiles.
+                    // Rates are anchored to source metrics to avoid collapsing all users into one profile.
+                    BehaviorPlan plan = buildBehaviorPlan(row, tenantUserId, scaledFactor);
+                    int play = plan.playActions();
+                    int like = plan.likeActions();
+                    int comment = plan.commentActions();
                     int total = Math.min(60, play + like + comment);
                     int remaining = maxRows - totalInserted - pending;
                     if (remaining <= 0) {
@@ -1721,29 +1717,128 @@ public class CrawlerServiceImpl implements CrawlerService {
         });
     }
 
-    private int scaleBehaviorCount(int baseCount, double factor) {
-        if (baseCount <= 0 || factor <= 0D) {
+    private BehaviorPlan buildBehaviorPlan(VideoRow row, long tenantUserId, double scaledFactor) {
+        int profileBucket = resolveBehaviorProfileBucket(tenantUserId, row);
+        double playMultiplier;
+        double likeMultiplier;
+        double commentMultiplier;
+        double likeFloor;
+        double commentFloor;
+
+        // 0=light, 1=steady, 2=like-driven, 3=high-interaction, 4=high-frequency
+        switch (profileBucket) {
+            case 0 -> {
+                playMultiplier = 0.75;
+                likeMultiplier = 0.45;
+                commentMultiplier = 0.35;
+                likeFloor = 0.004;
+                commentFloor = 0.0005;
+            }
+            case 1 -> {
+                playMultiplier = 1.00;
+                likeMultiplier = 0.85;
+                commentMultiplier = 0.85;
+                likeFloor = 0.010;
+                commentFloor = 0.0015;
+            }
+            case 2 -> {
+                playMultiplier = 1.10;
+                likeMultiplier = 1.60;
+                commentMultiplier = 0.55;
+                likeFloor = 0.08;
+                commentFloor = 0.003;
+            }
+            case 3 -> {
+                playMultiplier = 1.20;
+                likeMultiplier = 2.30;
+                commentMultiplier = 8.50;
+                likeFloor = 0.12;
+                commentFloor = 0.06;
+            }
+            default -> {
+                playMultiplier = 1.55;
+                likeMultiplier = 1.10;
+                commentMultiplier = 2.40;
+                likeFloor = 0.05;
+                commentFloor = 0.012;
+            }
+        }
+
+        int playBase = estimatePlayActions(row.playCount);
+        int playRaw = clampInt((int) Math.round(playBase * playMultiplier), 3, 36);
+
+        double sourceLikeRate = row.playCount <= 0 ? 0D : (double) row.likeCount / (double) row.playCount;
+        double sourceCommentRate = row.playCount <= 0 ? 0D : (double) row.commentCount / (double) row.playCount;
+        double likeRate = clampDouble(Math.max(sourceLikeRate * likeMultiplier, likeFloor), 0.002, 0.35);
+        double commentRate = clampDouble(Math.max(sourceCommentRate * commentMultiplier, commentFloor), 0.0005, 0.18);
+
+        int likeRaw = clampInt((int) Math.round(playRaw * likeRate), 0, 20);
+        int commentRaw = clampInt((int) Math.round(playRaw * commentRate), 0, 14);
+
+        int play = scaleActionCountDeterministic(playRaw, scaledFactor, row.videoId ^ 0x9E3779B97F4A7C15L);
+        int like = scaleActionCountDeterministic(likeRaw, scaledFactor, row.videoId ^ 0xC2B2AE3D27D4EB4FL);
+        int comment = scaleActionCountDeterministic(commentRaw, scaledFactor, row.videoId ^ 0x165667B19E3779F9L);
+
+        if (playRaw > 0) {
+            play = clampInt(Math.max(play, 2), 2, 36);
+        }
+        // Keep rare interaction signals after scaling to avoid profile collapse.
+        if (likeRaw > 0 && like == 0 && profileBucket >= 2) {
+            like = 1;
+        }
+        if (commentRaw > 0 && comment == 0 && profileBucket >= 3) {
+            comment = 1;
+        }
+
+        return new BehaviorPlan(play, like, comment);
+    }
+
+    private int resolveBehaviorProfileBucket(long tenantUserId, VideoRow row) {
+        long seed = hashLong("tenant:" + tenantUserId + ":profile:" + row.authorId);
+        int code = (int) Math.floorMod(seed, 100);
+        if (code < 18) {
             return 0;
         }
-        return (int) Math.max(0L, Math.round(baseCount * factor));
+        if (code < 48) {
+            return 1;
+        }
+        if (code < 70) {
+            return 2;
+        }
+        if (code < 88) {
+            return 3;
+        }
+        return 4;
+    }
+
+    private int scaleActionCountDeterministic(int rawCount, double factor, long seed) {
+        if (rawCount <= 0 || factor <= 0D) {
+            return 0;
+        }
+        double scaled = rawCount * factor;
+        int base = (int) Math.floor(scaled);
+        double fraction = scaled - base;
+        if (fraction <= 0D) {
+            return Math.max(0, base);
+        }
+        int threshold = (int) Math.round(fraction * 10_000D);
+        int dice = (int) Math.floorMod(seed, 10_000);
+        if (dice < threshold) {
+            base += 1;
+        }
+        return Math.max(0, base);
     }
 
     private int estimatePlayActions(long playCount) {
-        int raw = (int) Math.round(Math.log10(Math.max(1D, playCount) + 9D) * 6D);
-        return clampInt(raw, 2, 24);
-    }
-
-    private int estimateLikeActions(long likeCount) {
-        int raw = (int) Math.round(Math.log10(Math.max(1D, likeCount) + 9D) * 4D);
-        return clampInt(raw, 1, 12);
-    }
-
-    private int estimateCommentActions(long commentCount) {
-        int raw = (int) Math.round(Math.log10(Math.max(1D, commentCount) + 9D) * 3D);
-        return clampInt(raw, 1, 8);
+        int raw = (int) Math.round(Math.log10(Math.max(1D, playCount) + 9D) * 4.0D);
+        return clampInt(raw, 3, 22);
     }
 
     private int clampInt(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private double clampDouble(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
     }
 
@@ -1938,6 +2033,9 @@ public class CrawlerServiceImpl implements CrawlerService {
     }
 
     private record ParseResult(List<VideoRow> rows, int dedupedRecords) {
+    }
+
+    private record BehaviorPlan(int playActions, int likeActions, int commentActions) {
     }
 
 }
