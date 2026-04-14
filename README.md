@@ -149,17 +149,3 @@ npm run dev
 - `database/upgrade_performance_light.sql`（轻量索引增强，不改业务功能）
 - `database/cleanup_optional_legacy_tables.sql`（历史原始表重命名归档，可回退）
 
-脚本分层说明：
-- `scripts/README.md`（主链路脚本与历史脚本）
-
-## 仓库说明
-
-- 当前仓库建议作为“源码仓库”使用
-- 自动生成的分析报告、日志、构建产物已默认忽略
-- 如需继续提交，请直接使用正常 Git 命令：
-
-```powershell
-git add .
-git commit -m "你的提交说明"
-git push
-```
