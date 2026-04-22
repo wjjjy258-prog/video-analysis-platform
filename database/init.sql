@@ -9,6 +9,10 @@ CREATE TABLE IF NOT EXISTS app_user (
   username VARCHAR(64) NOT NULL,
   password_hash VARCHAR(128) NOT NULL,
   password_salt VARCHAR(64) NOT NULL,
+  user_role VARCHAR(16) NOT NULL DEFAULT 'viewer',
+  creator_name VARCHAR(100) DEFAULT NULL,
+  creator_platform VARCHAR(32) NOT NULL DEFAULT 'unknown',
+  creator_focus_category VARCHAR(60) DEFAULT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uk_app_user_username (username)
@@ -177,10 +181,14 @@ CREATE TABLE IF NOT EXISTS tenant_overview_cache (
   INDEX idx_tenant_overview_refreshed (refreshed_at)
 );
 
-INSERT INTO app_user (id, username, password_hash, password_salt, created_at, updated_at)
-VALUES (1, 'demo', '81a30b2d68b8c5b25f10389a8ef153491b6b9d4e4e30fac1fd859c05d9c7f0c0', 'demo_salt_2026', NOW(), NOW())
+INSERT INTO app_user (id, username, password_hash, password_salt, user_role, creator_name, creator_platform, creator_focus_category, created_at, updated_at)
+VALUES (1, 'demo', '81a30b2d68b8c5b25f10389a8ef153491b6b9d4e4e30fac1fd859c05d9c7f0c0', 'demo_salt_2026', 'viewer', NULL, 'unknown', NULL, NOW(), NOW())
 ON DUPLICATE KEY UPDATE
   username = VALUES(username),
   password_hash = VALUES(password_hash),
   password_salt = VALUES(password_salt),
+  user_role = VALUES(user_role),
+  creator_name = VALUES(creator_name),
+  creator_platform = VALUES(creator_platform),
+  creator_focus_category = VALUES(creator_focus_category),
   updated_at = NOW();

@@ -11,14 +11,8 @@ if ([string]::IsNullOrWhiteSpace($MysqlUser)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($MysqlPassword)) {
-    Write-Warning "MYSQL_PASSWORD is empty."
-    $secure = Read-Host "Please enter MySQL password for user '$MysqlUser' (leave blank if no password)" -AsSecureString
-    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-    try {
-        $MysqlPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-    } finally {
-        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-    }
+    Write-Warning "MYSQL_PASSWORD is not set. If your MySQL account has a password, set MYSQL_PASSWORD before running."
+    $MysqlPassword = ""
 }
 
 $env:MYSQL_USER = $MysqlUser

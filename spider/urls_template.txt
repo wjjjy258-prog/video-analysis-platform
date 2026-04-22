@@ -1,14 +1,14 @@
-# URL batch import template
-# Rules:
-# 1) One URL per line
-# 2) Lines starting with # are comments
-# 3) Keep only public and authorized URLs
-# 4) Do NOT put private or sensitive links
+# 链接批量导入模板
+# 规则：
+# 1）每行一个链接
+# 2）以 # 开头的行视为注释
+# 3）仅保留公开且已获授权的链接
+# 4）不要填写任何私密或敏感链接
 
-# bilibili examples (placeholder, replace with your own legal URLs)
+# 哔哩哔哩示例（占位符，请替换为你自己的合法链接）
 <BILIBILI_VIDEO_URL_1>
 <BILIBILI_VIDEO_URL_2>
 
-# douyin examples (placeholder, replace with your own legal URLs)
+# 抖音示例（占位符，请替换为你自己的合法链接）
 <DOUYIN_VIDEO_URL_1>
 <DOUYIN_VIDEO_URL_2>

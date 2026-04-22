@@ -82,7 +82,7 @@ public class CrawlerController {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<CrawlRunResponse> handleOtherExceptions(Exception ex) {
-        // Keep detailed stack in server logs while returning concise error to UI.
+        // 【说明】服务端日志保留完整堆栈，前端只返回简洁错误信息，便于排障且不暴露细节。
         log.error("Unexpected crawler request failure", ex);
         CrawlRunResponse response = new CrawlRunResponse();
         response.setSuccess(false);

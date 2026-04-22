@@ -24,8 +24,9 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        // Keep startup migration deterministic: create -> add columns -> backfill -> indexes.
+        // 【说明】启动时按固定顺序迁移，确保可重复执行（建表 -> 加字段 -> 回填 -> 建索引）。
         ensureAuthTables();
+        ensureUserProfileColumns();
         long seedUserId = ensureSeedUser();
 
         ensureImportJobTable(seedUserId);
@@ -49,6 +50,10 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
                         "username VARCHAR(64) NOT NULL," +
                         "password_hash VARCHAR(128) NOT NULL," +
                         "password_salt VARCHAR(64) NOT NULL," +
+                        "user_role VARCHAR(16) NOT NULL DEFAULT 'viewer'," +
+                        "creator_name VARCHAR(100) NULL," +
+                        "creator_platform VARCHAR(32) NOT NULL DEFAULT 'unknown'," +
+                        "creator_focus_category VARCHAR(60) NULL," +
                         "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP," +
                         "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP," +
                         "UNIQUE KEY uk_app_user_username (username)" +
@@ -70,6 +75,15 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
         );
     }
 
+    private void ensureUserProfileColumns() {
+        addColumnIfMissing("app_user", "user_role", "VARCHAR(16) NOT NULL DEFAULT 'viewer' AFTER password_salt");
+        addColumnIfMissing("app_user", "creator_name", "VARCHAR(100) NULL AFTER user_role");
+        addColumnIfMissing("app_user", "creator_platform", "VARCHAR(32) NOT NULL DEFAULT 'unknown' AFTER creator_name");
+        addColumnIfMissing("app_user", "creator_focus_category", "VARCHAR(60) NULL AFTER creator_platform");
+        jdbcTemplate.execute("UPDATE app_user SET user_role='viewer' WHERE user_role IS NULL OR user_role=''");
+        jdbcTemplate.execute("UPDATE app_user SET creator_platform='unknown' WHERE creator_platform IS NULL OR creator_platform=''");
+    }
+
     private long ensureSeedUser() {
         Long demoId = queryLong("SELECT id FROM app_user WHERE username='demo' LIMIT 1");
         if (demoId != null && demoId > 0) {
@@ -81,10 +95,16 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
         String hash = PasswordUtil.hashPassword("123456", salt);
 
         jdbcTemplate.update(
-                "INSERT INTO app_user (username, password_hash, password_salt, created_at, updated_at) VALUES (?,?,?,?,?)",
+                "INSERT INTO app_user " +
+                        "(username, password_hash, password_salt, user_role, creator_name, creator_platform, creator_focus_category, created_at, updated_at) " +
+                        "VALUES (?,?,?,?,?,?,?,?,?)",
                 "demo",
                 hash,
                 salt,
+                "viewer",
+                null,
+                "unknown",
+                null,
                 Timestamp.valueOf(now),
                 Timestamp.valueOf(now)
         );
@@ -94,7 +114,7 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
     }
 
     private void ensureTenantColumns(long seedUserId) {
-        // Tenant isolation is mandatory across all business tables.
+        // 【说明】所有业务表必须具备租户隔离字段，避免多用户数据互相污染。
         addColumnIfMissing("video", "tenant_user_id", "BIGINT NOT NULL DEFAULT " + seedUserId + " AFTER id");
         addColumnIfMissing("user", "tenant_user_id", "BIGINT NOT NULL DEFAULT " + seedUserId + " AFTER user_id");
         addColumnIfMissing("comment", "tenant_user_id", "BIGINT NOT NULL DEFAULT " + seedUserId + " AFTER comment_id");
@@ -106,7 +126,7 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
     }
 
     private void ensureVideoColumns(long seedUserId) {
-        // Standardized ingestion fields. All are additive for backward compatibility.
+        // 【说明】标准化入库字段采用“只增不减”策略，兼容历史数据库版本。
         addColumnIfMissing("video", "source_platform", "VARCHAR(32) NOT NULL DEFAULT 'unknown' AFTER author");
         addColumnIfMissing("video", "source_url", "VARCHAR(1000) NULL AFTER source_platform");
         addColumnIfMissing("video", "platform_video_id", "VARCHAR(128) NULL AFTER dedupe_key");
@@ -148,7 +168,7 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
     }
 
     private void ensureImportRejectTable(long seedUserId) {
-        // Reject table stores rows filtered by quality gate with actionable feedback.
+        // 【说明】拒绝记录表用于保存被质量门禁拦截的数据及可执行修复建议。
         jdbcTemplate.execute(
                 "CREATE TABLE IF NOT EXISTS import_reject_record (" +
                         "id BIGINT PRIMARY KEY AUTO_INCREMENT," +
@@ -200,7 +220,7 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
     }
 
     private void backfillVideoData(long seedUserId) {
-        // Backfill protects existing databases when upgrading from older schema versions.
+        // 【说明】升级旧版本库时执行回填，保证历史数据结构可用。
         jdbcTemplate.execute(
                 "UPDATE video " +
                         "SET tenant_user_id = " + seedUserId + " " +
@@ -363,7 +383,7 @@ public class SchemaUpgradeRunner implements CommandLineRunner {
     }
 
     private void ensureVideoIndexes() {
-        // Query-path indexes for dashboard reads and import dedupe checks.
+        // 【说明】为看板查询与导入去重路径建立索引，降低查询与写入开销。
         if (indexExists("video", "uk_video_dedupe")) {
             jdbcTemplate.execute("DROP INDEX uk_video_dedupe ON video");
         }

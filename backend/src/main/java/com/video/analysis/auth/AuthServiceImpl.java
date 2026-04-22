@@ -14,6 +14,7 @@ import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -24,6 +25,9 @@ import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 
 @Service
 public class AuthServiceImpl implements AuthService {
+
+    private static final String ROLE_VIEWER = "viewer";
+    private static final String ROLE_CREATOR = "creator";
 
     private static final int SESSION_DAYS = 30;
     private static final int MAX_FAILED_LOGIN = 6;
@@ -53,14 +57,19 @@ public class AuthServiceImpl implements AuthService {
         String username = normalizeUsername(request.getUsername());
         String password = request.getPassword() == null ? "" : request.getPassword().trim();
         String confirm = request.getConfirmPassword() == null ? "" : request.getConfirmPassword().trim();
+        String role = normalizeRole(request.getRole());
+        String creatorName = normalizeCreatorName(request.getCreatorName());
+        String creatorPlatform = normalizeCreatorPlatform(request.getCreatorPlatform());
+        String creatorFocusCategory = normalizeCreatorFocusCategory(request.getCreatorFocusCategory());
 
         if (!password.equals(confirm)) {
-            throw new ResponseStatusException(BAD_REQUEST, "Passwords do not match.");
+            throw new ResponseStatusException(BAD_REQUEST, "两次输入的密码不一致。");
         }
         validatePasswordStrength(password);
+        validateCreatorProfile(role, creatorName);
 
         if (findUserByUsername(username) != null) {
-            throw new ResponseStatusException(BAD_REQUEST, "Username already exists.");
+            throw new ResponseStatusException(BAD_REQUEST, "用户名已存在。");
         }
 
         String salt = PasswordUtil.randomSaltHex();
@@ -69,28 +78,34 @@ public class AuthServiceImpl implements AuthService {
 
         try {
             jdbcTemplate.update(
-                    "INSERT INTO app_user (username, password_hash, password_salt, created_at, updated_at) VALUES (?,?,?,?,?)",
+                    "INSERT INTO app_user " +
+                            "(username, password_hash, password_salt, user_role, creator_name, creator_platform, creator_focus_category, created_at, updated_at) " +
+                            "VALUES (?,?,?,?,?,?,?,?,?)",
                     username,
                     hash,
                     salt,
+                    role,
+                    creatorName,
+                    creatorPlatform,
+                    creatorFocusCategory,
                     Timestamp.valueOf(now),
                     Timestamp.valueOf(now)
             );
         } catch (DuplicateKeyException ex) {
-            throw new ResponseStatusException(BAD_REQUEST, "Username already exists.");
+            throw new ResponseStatusException(BAD_REQUEST, "用户名已存在。");
         }
 
         AppUserRow user = findUserByUsername(username);
         if (user == null) {
-            throw new ResponseStatusException(BAD_REQUEST, "Register failed. Please retry.");
+            throw new ResponseStatusException(BAD_REQUEST, "注册失败，请稍后重试。");
         }
 
         SessionInfo session = createSession(user.id());
         return AuthResponse.success(
-                "Register success.",
+                ROLE_CREATOR.equals(user.role()) ? "创作者账号注册成功。" : "账号注册成功。",
                 session.token(),
                 session.expiresAt(),
-                new AuthResponse.UserInfo(user.id(), user.username(), user.createdAt())
+                buildUserInfo(user)
         );
     }
 
@@ -110,7 +125,7 @@ public class AuthServiceImpl implements AuthService {
         if (user == null || !PasswordUtil.verify(password, user.passwordSalt(), user.passwordHash())) {
             recordFailedAttempt(userKey);
             recordFailedAttempt(ipKey);
-            throw new ResponseStatusException(UNAUTHORIZED, "Invalid username or password.");
+            throw new ResponseStatusException(UNAUTHORIZED, "用户名或密码错误。");
         }
 
         clearLoginAttempt(userKey);
@@ -119,10 +134,10 @@ public class AuthServiceImpl implements AuthService {
 
         SessionInfo session = createSession(user.id());
         return AuthResponse.success(
-                "Login success.",
+                ROLE_CREATOR.equals(user.role()) ? "登录成功，正在进入创作者中心。" : "登录成功，正在进入平台。",
                 session.token(),
                 session.expiresAt(),
-                new AuthResponse.UserInfo(user.id(), user.username(), user.createdAt())
+                buildUserInfo(user)
         );
     }
 
@@ -144,17 +159,17 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponse current(String token) {
         AuthPrincipal principal = resolveToken(token);
         if (principal == null) {
-            throw new ResponseStatusException(UNAUTHORIZED, "Session expired. Please login again.");
+            throw new ResponseStatusException(UNAUTHORIZED, "登录状态已失效，请重新登录。");
         }
         AppUserRow user = findUserById(principal.userId());
         if (user == null) {
-            throw new ResponseStatusException(UNAUTHORIZED, "User not found. Please login again.");
+            throw new ResponseStatusException(UNAUTHORIZED, "当前账号不存在，请重新登录。");
         }
         return AuthResponse.success(
-                "Session valid.",
+                "登录状态有效。",
                 principal.token(),
                 readSessionExpiresAt(principal.token()),
-                new AuthResponse.UserInfo(user.id(), user.username(), user.createdAt())
+                buildUserInfo(user)
         );
     }
 
@@ -198,9 +213,41 @@ public class AuthServiceImpl implements AuthService {
     private String normalizeUsername(String username) {
         String value = username == null ? "" : username.trim();
         if (value.isEmpty()) {
-            throw new ResponseStatusException(BAD_REQUEST, "Username cannot be empty.");
+            throw new ResponseStatusException(BAD_REQUEST, "用户名不能为空。");
         }
         return value;
+    }
+
+    private String normalizeRole(String role) {
+        String value = role == null ? ROLE_VIEWER : role.trim().toLowerCase(Locale.ROOT);
+        if (!ROLE_VIEWER.equals(value) && !ROLE_CREATOR.equals(value)) {
+            throw new ResponseStatusException(BAD_REQUEST, "身份类型不正确。");
+        }
+        return value;
+    }
+
+    private String normalizeCreatorName(String creatorName) {
+        String value = creatorName == null ? "" : creatorName.trim();
+        return value.isEmpty() ? null : value;
+    }
+
+    private String normalizeCreatorPlatform(String creatorPlatform) {
+        String value = creatorPlatform == null ? "" : creatorPlatform.trim().toLowerCase(Locale.ROOT);
+        return value.isEmpty() ? "unknown" : value;
+    }
+
+    private String normalizeCreatorFocusCategory(String creatorFocusCategory) {
+        String value = creatorFocusCategory == null ? "" : creatorFocusCategory.trim();
+        return value.isEmpty() ? null : value;
+    }
+
+    private void validateCreatorProfile(String role, String creatorName) {
+        if (!ROLE_CREATOR.equals(role)) {
+            return;
+        }
+        if (creatorName == null || creatorName.isBlank()) {
+            throw new ResponseStatusException(BAD_REQUEST, "内容创作者必须填写创作者名称。");
+        }
     }
 
     private String normalizeClientIp(String clientIp) {
@@ -217,7 +264,7 @@ public class AuthServiceImpl implements AuthService {
     private void validatePasswordStrength(String password) {
         String value = password == null ? "" : password.trim();
         if (value.length() < 8) {
-            throw new ResponseStatusException(BAD_REQUEST, "Password length must be at least 8.");
+            throw new ResponseStatusException(BAD_REQUEST, "密码长度至少为 8 位。");
         }
         boolean hasLetter = false;
         boolean hasDigit = false;
@@ -232,7 +279,7 @@ public class AuthServiceImpl implements AuthService {
                 return;
             }
         }
-        throw new ResponseStatusException(BAD_REQUEST, "Password must contain letters and digits.");
+        throw new ResponseStatusException(BAD_REQUEST, "密码必须同时包含字母和数字。");
     }
 
     private void ensureNotLocked(String key) {
@@ -243,7 +290,7 @@ public class AuthServiceImpl implements AuthService {
             return;
         }
         if (state.lockedUntil() != null && state.lockedUntil().isAfter(now)) {
-            throw new ResponseStatusException(TOO_MANY_REQUESTS, "Too many login attempts. Please retry later.");
+            throw new ResponseStatusException(TOO_MANY_REQUESTS, "登录尝试过于频繁，请稍后再试。");
         }
         if (state.windowStartedAt().plusMinutes(LOGIN_WINDOW_MINUTES).isBefore(now)) {
             loginAttemptMap.remove(key, state);
@@ -346,12 +393,17 @@ public class AuthServiceImpl implements AuthService {
 
     private AppUserRow findUserByUsername(String username) {
         List<AppUserRow> rows = jdbcTemplate.query(
-                "SELECT id, username, password_hash, password_salt, created_at FROM app_user WHERE username=? LIMIT 1",
+                "SELECT id, username, password_hash, password_salt, user_role, creator_name, creator_platform, creator_focus_category, created_at " +
+                        "FROM app_user WHERE username=? LIMIT 1",
                 (rs, rowNum) -> new AppUserRow(
                         rs.getLong("id"),
                         rs.getString("username"),
                         rs.getString("password_hash"),
                         rs.getString("password_salt"),
+                        rs.getString("user_role"),
+                        rs.getString("creator_name"),
+                        rs.getString("creator_platform"),
+                        rs.getString("creator_focus_category"),
                         rs.getTimestamp("created_at").toLocalDateTime()
                 ),
                 username
@@ -364,12 +416,17 @@ public class AuthServiceImpl implements AuthService {
             return null;
         }
         List<AppUserRow> rows = jdbcTemplate.query(
-                "SELECT id, username, password_hash, password_salt, created_at FROM app_user WHERE id=? LIMIT 1",
+                "SELECT id, username, password_hash, password_salt, user_role, creator_name, creator_platform, creator_focus_category, created_at " +
+                        "FROM app_user WHERE id=? LIMIT 1",
                 (rs, rowNum) -> new AppUserRow(
                         rs.getLong("id"),
                         rs.getString("username"),
                         rs.getString("password_hash"),
                         rs.getString("password_salt"),
+                        rs.getString("user_role"),
+                        rs.getString("creator_name"),
+                        rs.getString("creator_platform"),
+                        rs.getString("creator_focus_category"),
                         rs.getTimestamp("created_at").toLocalDateTime()
                 ),
                 id
@@ -377,7 +434,31 @@ public class AuthServiceImpl implements AuthService {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
-    private record AppUserRow(Long id, String username, String passwordHash, String passwordSalt, LocalDateTime createdAt) {
+    private AuthResponse.UserInfo buildUserInfo(AppUserRow user) {
+        String role = user.role() == null || user.role().isBlank() ? ROLE_VIEWER : user.role();
+        return new AuthResponse.UserInfo(
+                user.id(),
+                user.username(),
+                role,
+                ROLE_CREATOR.equals(role) ? "内容创作者" : "观众",
+                user.creatorName(),
+                user.creatorPlatform(),
+                user.creatorFocusCategory(),
+                user.createdAt()
+        );
+    }
+
+    private record AppUserRow(
+            Long id,
+            String username,
+            String passwordHash,
+            String passwordSalt,
+            String role,
+            String creatorName,
+            String creatorPlatform,
+            String creatorFocusCategory,
+            LocalDateTime createdAt
+    ) {
     }
 
     private record SessionInfo(String token, LocalDateTime expiresAt) {

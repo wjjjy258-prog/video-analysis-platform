@@ -2,6 +2,7 @@ package com.video.analysis.controller;
 
 import com.video.analysis.dto.CategoryStatVO;
 import com.video.analysis.dto.CategoryEngagementVO;
+import com.video.analysis.dto.CreatorProfileUpdateRequest;
 import com.video.analysis.dto.FunnelStatVO;
 import com.video.analysis.dto.HotVideoVO;
 import com.video.analysis.dto.InsightCardVO;
@@ -16,7 +17,9 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -117,6 +120,17 @@ public class VideoController {
     @GetMapping("/insight")
     public List<InsightCardVO> insight(@RequestParam(required = false) String platform) {
         return videoService.getInsightCards(normalizePlatform(platform));
+    }
+
+    @GetMapping("/creator/dashboard")
+    public Map<String, Object> creatorDashboard(@RequestParam(required = false) String platform) {
+        return videoService.getCreatorDashboard(normalizePlatform(platform));
+    }
+
+    @PostMapping("/creator/profile")
+    public Map<String, Object> updateCreatorProfile(@RequestBody(required = false) CreatorProfileUpdateRequest request) {
+        CreatorProfileUpdateRequest safeRequest = request == null ? new CreatorProfileUpdateRequest() : request;
+        return videoService.updateCreatorProfile(safeRequest);
     }
 
     private String normalizePlatform(String platform) {

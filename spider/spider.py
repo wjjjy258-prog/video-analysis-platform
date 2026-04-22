@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import json
@@ -29,7 +29,7 @@ from url_template_tool import generate_template, validate_url_file
 
 try:
     from kafka import KafkaProducer
-except Exception:  # pragma: no cover
+except Exception:  # 【说明】可选依赖；测试环境未安装时允许忽略。
     KafkaProducer = None
 
 

@@ -7,40 +7,40 @@ from urllib.parse import urlparse
 from platform_collectors import detect_platform
 
 
-TEMPLATE_TEXT = """# URL batch import template
-# Rules:
-# 1) One URL per line
-# 2) Lines starting with # are comments
-# 3) Keep only public and authorized URLs
-# 4) Do NOT put private or sensitive links
+TEMPLATE_TEXT = """# 批量链接导入模板
+# 规则：
+# 1）每行一个链接
+# 2）以 # 开头的行视为注释
+# 3）仅保留公开且已获授权的链接
+# 4）不要填写任何私密或敏感链接
 
-# bilibili examples (placeholder, replace with your own legal URLs)
+# 哔哩哔哩示例（占位符，请替换为你自己的合法链接）
 <BILIBILI_VIDEO_URL_1>
 <BILIBILI_VIDEO_URL_2>
 
-# douyin examples (placeholder, replace with your own legal URLs)
+# 抖音示例（占位符，请替换为你自己的合法链接）
 <DOUYIN_VIDEO_URL_1>
 <DOUYIN_VIDEO_URL_2>
 
-# kuaishou examples
+# 快手示例
 <KUAISHOU_VIDEO_URL_1>
 
-# xiaohongshu examples
+# 小红书示例
 <XIAOHONGSHU_VIDEO_URL_1>
 
-# xigua examples
+# 西瓜视频示例
 <XIGUA_VIDEO_URL_1>
 
-# weibo examples
+# 微博示例
 <WEIBO_VIDEO_URL_1>
 
-# youtube examples
+# 油管示例
 <YOUTUBE_VIDEO_URL_1>
 
-# tiktok examples
+# 国际抖音示例
 <TIKTOK_VIDEO_URL_1>
 
-# acfun examples
+# 交流站示例
 <ACFUN_VIDEO_URL_1>
 """
 

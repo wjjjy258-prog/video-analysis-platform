@@ -58,7 +58,7 @@ function Get-ListeningPidsByPort([int]$Port) {
             $pids += $rows | Select-Object -ExpandProperty OwningProcess
         }
     } catch {
-        # Ignore and fallback to netstat
+        # 【说明】忽略该异常，回退到系统端口检测方案继续检查端口占用。
     }
 
     if (-not $pids -or $pids.Count -eq 0) {
@@ -71,7 +71,7 @@ function Get-ListeningPidsByPort([int]$Port) {
                 }
             }
         } catch {
-            # Ignore
+            # 【说明】忽略端口检测解析异常，保持函数可继续返回。
         }
     }
 
@@ -94,20 +94,6 @@ function Stop-ListeningProcessOnPort([int]$Port, [string]$ServiceName) {
     Start-Sleep -Seconds 1
 }
 
-function Ensure-MySqlPassword([string]$CurrentPassword, [string]$UserName) {
-    if (-not [string]::IsNullOrWhiteSpace($CurrentPassword)) {
-        return $CurrentPassword
-    }
-    Write-Warning "MYSQL_PASSWORD is empty."
-    $secure = Read-Host "Please enter MySQL password for user '$UserName' (leave blank if no password)" -AsSecureString
-    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-    try {
-        return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-    } finally {
-        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-    }
-}
-
 Write-Step "Checking Python"
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
     throw "Python not found. Please install Python 3.10+."
@@ -119,7 +105,14 @@ if ($LASTEXITCODE -ne 0) {
     throw "Package install failed."
 }
 
-$MysqlPassword = Ensure-MySqlPassword -CurrentPassword $MysqlPassword -UserName $MysqlUser
+if ([string]::IsNullOrWhiteSpace($MysqlUser)) {
+    $MysqlUser = "root"
+}
+if ([string]::IsNullOrWhiteSpace($MysqlPassword)) {
+    Write-Warning "MYSQL_PASSWORD is not set. If your MySQL account has a password, set MYSQL_PASSWORD before running."
+    $MysqlPassword = ""
+}
+
 $env:MYSQL_USER = $MysqlUser
 $env:MYSQL_PASSWORD = $MysqlPassword
 

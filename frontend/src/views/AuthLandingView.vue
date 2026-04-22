@@ -58,6 +58,63 @@
           />
         </label>
 
+        <template v-if="mode === 'register'">
+          <div class="role-section">
+            <span class="section-label">注册身份</span>
+            <div class="role-grid">
+              <label class="role-card" :class="{ active: form.role === 'viewer' }">
+                <input v-model="form.role" type="radio" value="viewer" />
+                <strong>观众</strong>
+                <small>范围：全站数据；重点：热门视频、分类统计、互动效率、用户分析。</small>
+              </label>
+              <label class="role-card" :class="{ active: form.role === 'creator' }">
+                <input v-model="form.role" type="radio" value="creator" />
+                <strong>内容创作者</strong>
+                <small>范围：自己 + 同行样本；重点：作品表现、同类对标、创作建议。</small>
+              </label>
+            </div>
+          </div>
+
+          <div v-if="form.role === 'creator'" class="creator-fields">
+            <label>
+              <span>创作者名称</span>
+              <input
+                v-model.trim="form.creatorName"
+                type="text"
+                placeholder="需与你导入数据中的作者名尽量一致"
+                maxlength="100"
+                required
+              />
+            </label>
+
+            <label>
+              <span>主运营平台</span>
+              <select v-model="form.creatorPlatform">
+                <option value="bilibili">哔哩哔哩</option>
+                <option value="douyin">抖音</option>
+                <option value="kuaishou">快手</option>
+                <option value="xiaohongshu">小红书</option>
+                <option value="xigua">西瓜视频</option>
+                <option value="weibo">微博</option>
+                <option value="youtube">YouTube</option>
+                <option value="tiktok">TikTok</option>
+                <option value="acfun">AcFun</option>
+                <option value="unknown">暂未确定</option>
+              </select>
+            </label>
+
+            <label>
+              <span>主打方向</span>
+              <input
+                v-model.trim="form.creatorFocusCategory"
+                type="text"
+                placeholder="例如：游戏、知识、影视、音乐"
+                maxlength="60"
+              />
+            </label>
+          </div>
+        </template>
+
         <button class="submit-btn" :disabled="submitting" type="submit">
           {{ submitting ? "处理中..." : mode === "login" ? "登录" : "注册并登录" }}
         </button>
@@ -79,7 +136,7 @@ import { getErrorMessage, getSuccessMessage } from "../utils/feedback";
 
 const mode = ref("login");
 const submitting = ref(false);
-const message = ref("支持按账号独立数据隔离，注册后可导入自己的视频数据。");
+const message = ref("支持观众与内容创作者双身份注册，登录后进入各自的专属数据空间。");
 const messageType = ref("info");
 const route = useRoute();
 const router = useRouter();
@@ -88,7 +145,11 @@ const { setAuth } = useAuth();
 const form = reactive({
   username: "",
   password: "",
-  confirmPassword: ""
+  confirmPassword: "",
+  role: "viewer",
+  creatorName: "",
+  creatorPlatform: "bilibili",
+  creatorFocusCategory: ""
 });
 
 const danmakuTexts = [
@@ -110,6 +171,9 @@ const danmakuTexts = [
   "导入后自动生成行为日志，支持画像建模",
   "趋势与分类模块支持大数据量查询",
   "全自动脚本支持一键初始化、启动与自测",
+  "内容创作者中心：聚焦自己的作品表现与增长机会",
+  "同行对标分析：比较平均播放、互动效率与优势方向",
+  "创作者专属建议：根据自己和同行差距输出运营提示",
   "后端 Spring Boot + MySQL 稳定支撑",
   "前端 Vue + ECharts + Three.js 交互可视化",
   "数据清理功能支持账号级彻底清空",
@@ -179,6 +243,12 @@ const submit = async () => {
     notifyWarning(msg, { title: "参数校验" });
     return;
   }
+  if (mode.value === "register" && form.role === "creator" && !form.creatorName) {
+    const msg = "内容创作者身份需要填写创作者名称。";
+    setPageMessage(msg, "error");
+    notifyWarning(msg, { title: "参数校验" });
+    return;
+  }
 
   submitting.value = true;
   try {
@@ -189,7 +259,14 @@ const submit = async () => {
     const data =
       mode.value === "login"
         ? await login(payload)
-        : await register({ ...payload, confirmPassword: form.confirmPassword });
+        : await register({
+          ...payload,
+          confirmPassword: form.confirmPassword,
+          role: form.role,
+          creatorName: form.role === "creator" ? form.creatorName : "",
+          creatorPlatform: form.role === "creator" ? form.creatorPlatform : "unknown",
+          creatorFocusCategory: form.role === "creator" ? form.creatorFocusCategory : ""
+        });
 
     if (!data?.success || !data?.token) {
       throw new Error(getSuccessMessage(data?.message, "认证失败。"));
@@ -200,13 +277,16 @@ const submit = async () => {
       user: data.user
     });
 
-    const successMessage = mode.value === "login" ? "登录成功，正在进入平台..." : "注册成功，正在进入平台...";
+    const targetPath = data?.user?.role === "creator" ? "/creator" : "/dashboard";
+    const successMessage = mode.value === "login"
+      ? (data?.user?.role === "creator" ? "登录成功，正在进入创作者中心..." : "登录成功，正在进入平台...")
+      : (data?.user?.role === "creator" ? "创作者注册成功，正在进入创作者中心..." : "注册成功，正在进入平台...");
     setPageMessage(successMessage, "info");
     notifySuccess(successMessage);
 
     const redirect = typeof route.query.redirect === "string" && route.query.redirect.trim()
       ? route.query.redirect
-      : "/dashboard";
+      : targetPath;
     await router.replace(redirect);
   } catch (error) {
     const msg = getErrorMessage(error, "请求失败，请稍后再试。");
@@ -316,6 +396,59 @@ h1 {
   font-size: 15px;
   padding: 10px 12px;
   cursor: pointer;
+}
+
+.role-section,
+.creator-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.section-label {
+  font-size: 13px;
+  color: #bdd4ef;
+}
+
+.role-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.role-card {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  padding: 14px 14px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(129, 168, 223, 0.34);
+  background: rgba(53, 79, 120, 0.52);
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+.role-card input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.role-card strong {
+  font-size: 15px;
+  color: #f5f9ff;
+}
+
+.role-card small {
+  line-height: 1.55;
+  color: #c2d8f1;
+}
+
+.role-card.active {
+  border-color: rgba(100, 189, 255, 0.82);
+  background: rgba(40, 111, 195, 0.34);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(13, 70, 136, 0.22);
 }
 
 .tab-row button.active {

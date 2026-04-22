@@ -116,15 +116,15 @@ public class CrawlerServiceImpl implements CrawlerService {
     @Override
     public CrawlRunResponse runUrlCrawl(String platform, List<String> urls, boolean confirmRisk) {
         if (!confirmRisk) {
-            throw new IllegalArgumentException("URL crawl requires explicit risk confirmation.");
+            throw new IllegalArgumentException("执行 URL 采集前请先勾选风险确认。");
         }
         if (urls == null || urls.isEmpty()) {
-            throw new IllegalArgumentException("Please provide at least one URL.");
+            throw new IllegalArgumentException("请至少提供一个 URL。");
         }
 
         String p = normalizePlatform(platform, "auto");
         if (!SUPPORTED_URL_PLATFORMS.contains(p)) {
-            throw new IllegalArgumentException("platform濞寸姴鎳忛弫顕€骞?auto/bilibili/douyin/kuaishou/xiaohongshu/xigua/weibo/youtube/tiktok/acfun");
+            throw new IllegalArgumentException("采集平台参数不合法，仅支持：auto/bilibili/douyin/kuaishou/xiaohongshu/xigua/weibo/youtube/tiktok/acfun");
         }
 
         Path tempFile = null;
@@ -139,7 +139,7 @@ public class CrawlerServiceImpl implements CrawlerService {
                     "--unsafe-allow-url-crawl"
             ));
         } catch (IOException ex) {
-            throw new RuntimeException("闁圭瑳鍡╂斀URL闂佹彃娲▔锔藉緞鏉堫偉袝: " + ex.getMessage(), ex);
+            throw new RuntimeException("写入 URL 临时文件失败：" + ex.getMessage(), ex);
         } finally {
             if (tempFile != null) {
                 try {
@@ -158,7 +158,7 @@ public class CrawlerServiceImpl implements CrawlerService {
     @Override
     public CrawlRunResponse clearTenantData(boolean confirm) {
         if (!confirm) {
-            throw new IllegalArgumentException("Clearing data requires explicit confirmation.");
+            throw new IllegalArgumentException("清除数据前请先确认操作。");
         }
 
         long tenantUserId = AuthContext.requireUserId();
@@ -179,7 +179,7 @@ public class CrawlerServiceImpl implements CrawlerService {
         response.setFinishedAt(LocalDateTime.now());
         response.setSuccess(true);
         response.setExitCode(0);
-        response.setMessage("Tenant data cleared successfully.");
+        response.setMessage("当前账号数据已清除。");
         response.setOutput(
                 "deleted: video=" + deletedVideo +
                         ", user_behavior=" + deletedBehavior +
@@ -234,7 +234,7 @@ public class CrawlerServiceImpl implements CrawlerService {
     @Transactional
     public CrawlRunResponse importFromFile(String fileName, byte[] content, String defaultPlatform, boolean aiAssist) {
         if (content == null || content.length == 0) {
-            throw new IllegalArgumentException("Uploaded file is empty.");
+            throw new IllegalArgumentException("上传文件为空。");
         }
         String name = fileName == null || fileName.isBlank() ? "upload.txt" : fileName;
         String lower = name.toLowerCase(Locale.ROOT);
@@ -243,7 +243,7 @@ public class CrawlerServiceImpl implements CrawlerService {
                 || lower.endsWith(".txt")
                 || lower.endsWith(".log")
                 || lower.endsWith(".csv"))) {
-            throw new IllegalArgumentException("濞寸姴鎳忛弫顕€骞?.md/.markdown/.txt/.log/.csv");
+            throw new IllegalArgumentException("文件格式不支持，仅支持 .md/.markdown/.txt/.log/.csv");
         }
 
         String text = decodeText(content);
@@ -253,7 +253,7 @@ public class CrawlerServiceImpl implements CrawlerService {
     private CrawlRunResponse importRowsFromText(String text, String defaultPlatform, String importType, String sourceFile, boolean aiAssist) {
         String raw = text == null ? "" : text.trim();
         if (raw.isEmpty()) {
-            throw new IllegalArgumentException("Input text is empty.");
+            throw new IllegalArgumentException("输入文本为空。");
         }
 
         long tenantUserId = AuthContext.requireUserId();
@@ -284,8 +284,8 @@ public class CrawlerServiceImpl implements CrawlerService {
                     + "5) 纯文本建议勾选“AI 增强解析”后重试。";
             if (aiAssist) {
                 output += System.lineSeparator()
-                        + "AI 状态：aiAssist=true, aiUsed=" + parseContext.aiUsed()
-                        + ", aiMessage=" + defaultIfBlank(parseContext.aiMessage(), "none");
+                        + "AI 状态：aiAssist=true, AI启用=" + parseContext.aiUsed()
+                        + ", AI信息=" + defaultIfBlank(parseContext.aiMessage(), "无");
             }
             resp.setOutput(output);
             return resp;
@@ -298,23 +298,23 @@ public class CrawlerServiceImpl implements CrawlerService {
         boolean success = result.acceptedRows() > 0;
         resp.setSuccess(success);
         resp.setExitCode(success ? 0 : 1);
-        resp.setMessage(success ? "Import completed." : "No rows passed quality rules.");
-        String output = "records=" + rows.size()
-                + ", parseDedup=" + parse.dedupedRecords()
-                + ", acceptedRows=" + result.acceptedRows()
-                + ", lowQualityRows=" + result.lowQualityRows()
-                + ", rejectedRows=" + result.rejectedRows()
-                + ", newVideos=" + result.newVideoRows()
-                + ", updatedVideos=" + result.updatedVideoRows()
-                + ", users=" + result.userRows()
-                + ", behaviors=" + result.behaviorRows()
-                + ", jobId=" + result.importJobId();
+        resp.setMessage(success ? "数据导入完成。" : "没有记录通过质量规则。");
+        String output = "总记录=" + rows.size()
+                + ", 去重记录=" + parse.dedupedRecords()
+                + ", 入库记录=" + result.acceptedRows()
+                + ", 低质量记录=" + result.lowQualityRows()
+                + ", 拒绝记录=" + result.rejectedRows()
+                + ", 新增视频=" + result.newVideoRows()
+                + ", 更新视频=" + result.updatedVideoRows()
+                + ", 用户记录=" + result.userRows()
+                + ", 行为记录=" + result.behaviorRows()
+                + ", 任务ID=" + result.importJobId();
         if (aiAssist) {
-            output += ", aiUsed=" + parseContext.aiUsed()
-                    + ", aiRecords=" + parseContext.aiRecords()
-                    + ", aiMessage=" + defaultIfBlank(parseContext.aiMessage(), "none");
+            output += ", AI启用=" + parseContext.aiUsed()
+                    + ", AI解析记录=" + parseContext.aiRecords()
+                    + ", AI信息=" + defaultIfBlank(parseContext.aiMessage(), "无");
         }
-        output += (sourceFile == null ? "" : ", file=" + sourceFile);
+        output += (sourceFile == null ? "" : ", 文件=" + sourceFile);
         resp.setOutput(output);
         return resp;
     }
@@ -420,19 +420,19 @@ public class CrawlerServiceImpl implements CrawlerService {
             }
             exitCode = p.waitFor();
         } catch (Exception ex) {
-            throw new RuntimeException("Failed to execute crawler process: " + ex.getMessage(), ex);
+            throw new RuntimeException("执行采集进程失败：" + ex.getMessage(), ex);
         }
 
         resp.setFinishedAt(LocalDateTime.now());
         resp.setExitCode(exitCode);
         resp.setSuccess(exitCode == 0);
-        resp.setMessage(exitCode == 0 ? "Crawl completed." : "Crawl failed.");
+        resp.setMessage(exitCode == 0 ? "采集任务执行完成。" : "采集任务执行失败。");
         resp.setOutput(out.toString());
         return resp;
     }
 
     private ParseResult parseRows(String text, String defaultPlatform, String importType, String sourceFile, long tenantUserId) {
-        // Parse with multiple strategies and merge by dedupe key to maximize recall.
+        // 【说明】使用多种解析策略并按去重键合并，尽量提高可识别记录的召回率。
         Map<String, VideoRow> dedup = new LinkedHashMap<>();
         int[] dedupedRecords = new int[]{0};
         addRows(dedup, parseJson(text, defaultPlatform, importType, sourceFile, tenantUserId), dedupedRecords);
@@ -452,7 +452,7 @@ public class CrawlerServiceImpl implements CrawlerService {
             boolean aiAssist
     ) {
         ParseResult ruleParse = parseRows(raw, defaultPlatform, importType, sourceFile, tenantUserId);
-        // AI is only used when enabled and rule-based parsing quality is insufficient.
+        // 【说明】仅在启用智能增强且规则解析质量不足时，才触发智能补全解析。
         if (!aiAssist || aiImportExtractor == null || !needsAiEnhancement(ruleParse.rows())) {
             return new ParseContext(ruleParse, false, 0, aiAssist ? "规则解析质量已足够，未触发 AI 增强。" : "");
         }
@@ -466,7 +466,7 @@ public class CrawlerServiceImpl implements CrawlerService {
         }
 
         List<VideoRow> aiRows = toVideoRows(aiResult.records(), defaultPlatform, importType, sourceFile, tenantUserId);
-        // Mark AI-produced rows for downstream audit and reject diagnostics.
+        // 【说明】为智能增强产出的记录打标，便于后续审计与拒绝原因诊断。
         for (VideoRow aiRow : aiRows) {
             aiRow.aiUsed = true;
             if (aiRow.aiConfidence <= 0D) {
@@ -540,7 +540,7 @@ public class CrawlerServiceImpl implements CrawlerService {
         if (incoming == null || base == null) {
             return;
         }
-        // Keep strongest metrics while preserving earlier publish time.
+        // 【说明】合并冲突时保留更高质量指标，并优先保留更早发布时间。
         base.playCount = Math.max(base.playCount, incoming.playCount);
         base.likeCount = Math.max(base.likeCount, incoming.likeCount);
         base.commentCount = Math.max(base.commentCount, incoming.commentCount);
@@ -895,7 +895,7 @@ public class CrawlerServiceImpl implements CrawlerService {
                 map.put(key, m.group(1).trim());
             }
         } catch (Exception ignored) {
-            // Guard against malformed regex patterns to avoid failing the whole import.
+            // 【说明】防御非法正则，避免单条异常导致整批导入失败。
         }
     }
 
@@ -905,7 +905,7 @@ public class CrawlerServiceImpl implements CrawlerService {
         }
         Map<String, Object> normalizedMap = normalizeInputMap(map);
 
-        // Title is mandatory to avoid low-value noisy rows.
+        // 【说明】标题为必填项，避免低价值噪声数据入库。
         String title = pick(
                 normalizedMap,
                 "title", "video_title", "name",
@@ -947,7 +947,7 @@ public class CrawlerServiceImpl implements CrawlerService {
         }
 
         String normalizedSourceUrl = normalizeSourceUrl(url);
-        // dedupe_key is the single source of truth for idempotent import.
+        // 【说明】去重键字段是幂等导入的唯一依据。
         String dedupeKey = buildDedupeKey(platform, normalizedSourceUrl, title, author);
         String videoSeed = defaultIfBlank(rawVideoId, dedupeKey);
         long videoId = hashLong("tenant:" + tenantUserId + ":video:" + videoSeed);
@@ -1581,7 +1581,7 @@ public class CrawlerServiceImpl implements CrawlerService {
 
         List<VideoRow> acceptedRows = new ArrayList<>();
         List<VideoRow> rejectedRows = new ArrayList<>();
-        // Apply quality gate before touching main business tables.
+        // 【说明】在写入主业务表前先执行质量门禁。
         for (VideoRow row : rows) {
             row.importJobId = importJobId;
             row.importTime = now;
@@ -1614,7 +1614,7 @@ public class CrawlerServiceImpl implements CrawlerService {
 
         int videoCount = 0;
         if (!acceptedRows.isEmpty()) {
-            // Upsert keeps import idempotent and allows incremental enrichment.
+        // 【说明】使用“插入或更新”写法保证幂等，并支持增量补全字段。
             String videoSql = "INSERT INTO video " +
                     "(tenant_user_id,id,dedupe_key,platform_video_id,title,author,source_platform,source_url,category,play_count,like_count,comment_count,share_count,favorite_count,duration_sec,publish_time," +
                     "import_type,source_file,import_time,data_quality_score,ai_confidence,tags_json,extra_json,quality_level,import_job_id) " +
@@ -1726,7 +1726,7 @@ public class CrawlerServiceImpl implements CrawlerService {
         if (rejectedRows == null || rejectedRows.isEmpty()) {
             return 0;
         }
-        // Reject rows are persisted for user feedback and iterative data fixing.
+        // 【说明】拒绝数据会落库，供前端提示与后续迭代修复。
         String rejectSql = "INSERT INTO import_reject_record " +
                 "(tenant_user_id,import_job_id,source_platform,source_file,reject_reason,suggest_fix,raw_excerpt,quality_score,ai_used,ai_confidence,import_time) " +
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?)";
@@ -1826,8 +1826,8 @@ public class CrawlerServiceImpl implements CrawlerService {
                         break;
                     }
 
-                    // Generate synthetic actions with diversified behavior profiles.
-                    // Rates are anchored to source metrics to avoid collapsing all users into one profile.
+                    // 【说明】生成多样化行为样本，避免画像分布过于单一。
+                    // 【说明】采样比例锚定原始指标，减少所有用户被压缩成同一画像的问题。
                     BehaviorPlan plan = buildBehaviorPlan(row, tenantUserId, scaledFactor);
                     int play = plan.playActions();
                     int like = plan.likeActions();
@@ -1891,7 +1891,7 @@ public class CrawlerServiceImpl implements CrawlerService {
         double likeFloor;
         double commentFloor;
 
-        // 0=light, 1=steady, 2=like-driven, 3=high-interaction, 4=high-frequency
+        // 【说明】行为档位映射：0=轻度浏览，1=稳定观看，2=点赞驱动，3=高互动讨论，4=高频活跃。
         switch (profileBucket) {
             case 0 -> {
                 playMultiplier = 0.75;
@@ -1948,7 +1948,7 @@ public class CrawlerServiceImpl implements CrawlerService {
         if (playRaw > 0) {
             play = clampInt(Math.max(play, 2), 2, 36);
         }
-        // Keep rare interaction signals after scaling to avoid profile collapse.
+        // 【说明】缩放后保留少量稀疏互动信号，防止画像塌缩。
         if (likeRaw > 0 && like == 0 && profileBucket >= 2) {
             like = 1;
         }
@@ -2075,7 +2075,7 @@ public class CrawlerServiceImpl implements CrawlerService {
 
         Map<String, Long> result = new HashMap<>();
         int batchSize = safeBatchSize(dedupeQueryBatchSize, 2000);
-        // Chunk IN queries to avoid oversized SQL and parameter limits.
+        // 【说明】分片执行条件查询，避免语句过长与参数数量超限。
         for (int from = 0; from < dedupeKeys.size(); from += batchSize) {
             int to = Math.min(dedupeKeys.size(), from + batchSize);
             List<String> part = dedupeKeys.subList(from, to);

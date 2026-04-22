@@ -275,7 +275,7 @@ const operation = reactive({
   time: ""
 });
 
-// Map current task type to the loading text shown in a single shared loading component.
+// 【说明】将当前任务类型映射为统一加载组件展示的文案。
 const runningLoadingText = computed(() => {
   if (runningTask.value === "url") {
     return "正在执行 URL 采集与入库";
@@ -330,7 +330,7 @@ const extractMetric = (output, key) => {
   return match ? Number(match[1]) : null;
 };
 
-// Convert backend summary string (k=v,k=v) into readable status text for users.
+// 【说明】将后端摘要串（键=值,键=值）转换成用户可读状态文案。
 const buildImportDetail = (output) => {
   const records = extractMetric(output, "records");
   const acceptedRows = extractMetric(output, "acceptedRows");
@@ -383,7 +383,7 @@ const buildFailureDetail = (message, output) => {
   return "";
 };
 
-// Unified response handler so all import/crawl actions share consistent feedback UX.
+// 【说明】统一处理响应结果，保证导入/采集操作反馈风格一致。
 const applyResponse = (data, actionName, successFallback, failFallback) => {
   const success = Boolean(data?.success);
   const message = getSuccessMessage(data?.message, success ? successFallback : failFallback);
@@ -419,7 +419,7 @@ const finishTask = () => {
 };
 
 const refreshTraceSilently = () => {
-  // After any write operation, refresh both normal trace and reject trace in background.
+  // 【说明】每次写入后后台刷新普通追踪与拒绝追踪列表，避免界面信息过期。
   void loadTrace(false);
   void loadRejects(false);
 };
@@ -642,7 +642,7 @@ const loadTrace = async (notifyOnError = true) => {
 };
 
 const loadRejects = async (notifyOnError = true) => {
-  // Reject list helps users fix source data instead of retrying blindly.
+  // 【说明】拒绝列表用于指导用户修复源数据，避免盲目重复导入。
   rejectLoading.value = true;
   rejectError.value = "";
   try {

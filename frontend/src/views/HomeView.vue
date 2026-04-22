@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <section class="hero-card">
     <div>
       <h2 class="hero-title">平台简介</h2>
@@ -237,7 +237,7 @@ const fetchHomePayload = async () => {
       loadError: ""
     };
   } catch (_dashboardError) {
-    // Backward compatibility fallback for older backend versions.
+    // 【说明】兼容旧版后端返回结构，避免升级过程中首页报错。
   }
 
   const settledResults = await Promise.allSettled([

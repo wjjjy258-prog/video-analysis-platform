@@ -147,7 +147,7 @@ def generate_official_json_template(output_path: str) -> Path:
 def _validate_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[OfficialIssue]]:
     issues: list[OfficialIssue] = []
     normalized: list[dict[str, Any]] = []
-    for i, row in enumerate(rows, start=2):  # header is row 1 for csv; good enough for json
+    for i, row in enumerate(rows, start=2):  # 【说明】CSV 第 1 行是表头，因此数据从第 2 行计数；JSON 沿用同一规则便于统一报错行号。
         row_obj = {k: row.get(k) for k in REQUIRED_FIELDS}
         for field in REQUIRED_FIELDS:
             if row_obj.get(field) is None or str(row_obj.get(field)).strip() == "":

@@ -72,7 +72,7 @@ if (-not (Test-Path (Join-Path $frontendPath "node_modules"))) {
     }
 }
 
-# Force long-running crawler/import requests to avoid accidental 10s timeout from environment overrides.
+# 【说明】导入与采集请求可能耗时较长，这里强制关闭前端超时，避免被环境变量误设为 10 秒后中断。
 $env:VITE_API_TIMEOUT_MS = "0"
 
 if (-not [string]::IsNullOrWhiteSpace($npmPath)) {

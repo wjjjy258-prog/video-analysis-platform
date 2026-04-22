@@ -70,14 +70,33 @@ public class AuthResponse {
     public static class UserInfo {
         private Long id;
         private String username;
+        private String role;
+        private String roleLabel;
+        private String creatorName;
+        private String creatorPlatform;
+        private String creatorFocusCategory;
         private LocalDateTime createdAt;
 
         public UserInfo() {
         }
 
-        public UserInfo(Long id, String username, LocalDateTime createdAt) {
+        public UserInfo(
+                Long id,
+                String username,
+                String role,
+                String roleLabel,
+                String creatorName,
+                String creatorPlatform,
+                String creatorFocusCategory,
+                LocalDateTime createdAt
+        ) {
             this.id = id;
             this.username = username;
+            this.role = role;
+            this.roleLabel = roleLabel;
+            this.creatorName = creatorName;
+            this.creatorPlatform = creatorPlatform;
+            this.creatorFocusCategory = creatorFocusCategory;
             this.createdAt = createdAt;
         }
 
@@ -95,6 +114,46 @@ public class AuthResponse {
 
         public void setUsername(String username) {
             this.username = username;
+        }
+
+        public String getRole() {
+            return role;
+        }
+
+        public void setRole(String role) {
+            this.role = role;
+        }
+
+        public String getRoleLabel() {
+            return roleLabel;
+        }
+
+        public void setRoleLabel(String roleLabel) {
+            this.roleLabel = roleLabel;
+        }
+
+        public String getCreatorName() {
+            return creatorName;
+        }
+
+        public void setCreatorName(String creatorName) {
+            this.creatorName = creatorName;
+        }
+
+        public String getCreatorPlatform() {
+            return creatorPlatform;
+        }
+
+        public void setCreatorPlatform(String creatorPlatform) {
+            this.creatorPlatform = creatorPlatform;
+        }
+
+        public String getCreatorFocusCategory() {
+            return creatorFocusCategory;
+        }
+
+        public void setCreatorFocusCategory(String creatorFocusCategory) {
+            this.creatorFocusCategory = creatorFocusCategory;
         }
 
         public LocalDateTime getCreatedAt() {

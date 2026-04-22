@@ -2,6 +2,7 @@ package com.video.analysis.service;
 
 import com.video.analysis.dto.CategoryStatVO;
 import com.video.analysis.dto.CategoryEngagementVO;
+import com.video.analysis.dto.CreatorProfileUpdateRequest;
 import com.video.analysis.dto.FunnelStatVO;
 import com.video.analysis.dto.HotVideoVO;
 import com.video.analysis.dto.InsightCardVO;
@@ -42,4 +43,8 @@ public interface VideoService {
     Map<String, Object> getOverview(String platform);
 
     Map<String, Object> getDashboard(Integer hotLimit, String platform);
+
+    Map<String, Object> getCreatorDashboard(String platform);
+
+    Map<String, Object> updateCreatorProfile(CreatorProfileUpdateRequest request);
 }

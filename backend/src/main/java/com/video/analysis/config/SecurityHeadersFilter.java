@@ -25,7 +25,7 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
             response.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
         }
         if (request.getRequestURI().startsWith("/auth/")) {
-            // Authentication responses should never be cached by browser/proxy.
+            // 【说明】认证相关响应不允许被浏览器或代理缓存。
             response.setHeader("Cache-Control", "no-store, max-age=0");
             response.setHeader("Pragma", "no-cache");
         }

@@ -64,6 +64,19 @@ a {
   border-bottom: 1px solid rgba(196, 208, 225, 0.7);
 }
 
+.top-nav-subbar {
+  border-top: 1px solid rgba(214, 226, 241, 0.8);
+  background: rgba(247, 251, 255, 0.9);
+}
+
+.top-nav-subbar-inner {
+  width: min(1420px, calc(100% - 28px));
+  margin: 0 auto;
+  padding: 8px 0;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .global-loading-bar {
   position: fixed;
   left: 0;
@@ -112,27 +125,28 @@ a {
 }
 
 .top-nav-inner {
-  width: min(1340px, calc(100% - 24px));
+  width: min(1420px, calc(100% - 28px));
   margin: 0 auto;
-  padding: 14px 0;
+  padding: 10px 0;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
 }
 
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   margin-left: -4px;
 }
 
 .brand h1 {
   margin: 0;
-  font-size: 20px;
-  letter-spacing: 0.4px;
+  font-size: 18px;
+  letter-spacing: 0.25px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .brand-mark {
@@ -149,25 +163,31 @@ a {
 
 .nav-links {
   display: flex;
-  gap: 5px;
+  gap: 6px;
   flex-wrap: nowrap;
   justify-self: center;
   min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.nav-links::-webkit-scrollbar {
+  display: none;
 }
 
 .global-platform-controls {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  justify-self: end;
   justify-content: flex-end;
-  min-width: 252px;
+  min-width: 0;
 }
 
 .top-actions {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  justify-self: end;
 }
 
 .global-platform-controls.is-hidden {
@@ -176,7 +196,7 @@ a {
 }
 
 .nav-links a {
-  padding: 8px 9px;
+  padding: 8px 12px;
   border-radius: 8px;
   color: #334155;
   font-size: 14px;
@@ -266,17 +286,30 @@ a {
   gap: 8px;
   border: 1px solid #d6e2f1;
   border-radius: 999px;
-  padding: 5px 6px 5px 12px;
+  padding: 4px 6px 4px 10px;
   background: #f7fbff;
 }
 
 .account-name {
-  max-width: 140px;
+  max-width: 116px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
   color: #334155;
+}
+
+.account-role {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #eaf4ff;
+  border: 1px solid #d5e7fa;
+  color: #1d76d2;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .logout-btn {
@@ -573,41 +606,53 @@ code {
   .top-nav-inner {
     width: calc(100% - 24px);
     padding: 12px 0;
-    display: flex;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .top-nav-subbar-inner {
+    width: calc(100% - 24px);
+    justify-content: flex-start;
+  }
+
+  .top-nav-subbar .global-platform-controls {
+    width: 100%;
+    justify-content: flex-start;
     flex-wrap: wrap;
   }
 
+  .nav-links {
+    overflow-x: auto;
+    width: 100%;
+    grid-column: 1 / 4;
+    padding-bottom: 2px;
+  }
+
+  .top-actions {
+    justify-self: end;
+  }
+
+  .account-role {
+    display: none;
+  }
+
+  .brand {
+    margin-left: 0;
+  }
+
   .brand h1 {
-    font-size: 19px;
+    font-size: 17px;
   }
 
   .nav-links a {
-    font-size: 14px;
-    padding: 8px 10px;
+    font-size: 13px;
+    padding: 8px 9px;
   }
 
   .global-platform-switch {
     padding: 5px 8px;
-  }
-
-  .global-platform-controls {
-    width: 100%;
-    justify-content: flex-start;
-    min-width: 0;
-  }
-
-  .top-actions {
-    width: 100%;
-    flex-wrap: wrap;
-    justify-content: flex-start;
-  }
-
-  .global-platform-controls.is-hidden {
-    display: none;
-  }
-
-  .account-box {
-    margin-top: 4px;
   }
 
   .page-wrap {
@@ -617,5 +662,20 @@ code {
   .panel {
     padding: 14px;
     border-radius: 16px;
+  }
+}
+
+@media (max-width: 720px) {
+  .top-nav-inner {
+    grid-template-columns: 1fr;
+    flex-wrap: wrap;
+  }
+
+  .top-actions {
+    justify-self: start;
+  }
+
+  .nav-links {
+    grid-column: auto;
   }
 }

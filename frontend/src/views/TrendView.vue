@@ -37,8 +37,34 @@
     </section>
 
     <section class="panel">
-      <h2>平台互动漏斗</h2>
-      <EChartPanel v-if="funnelStats.length" :option="funnelOption" />
+      <h2>平台互动转化（播放 → 点赞 → 评论）</h2>
+      <p class="section-tip">说明：点赞转化率=点赞/播放；评论转化率=评论/播放；评赞比=评论/点赞。</p>
+      <div v-if="funnelStats.length" class="metric-grid compact-grid">
+        <div class="metric-item">
+          <p class="metric-label">总播放</p>
+          <p class="metric-value">{{ formatInt(funnelSummary.totalPlay) }}</p>
+        </div>
+        <div class="metric-item">
+          <p class="metric-label">总点赞</p>
+          <p class="metric-value">{{ formatInt(funnelSummary.totalLike) }}</p>
+        </div>
+        <div class="metric-item">
+          <p class="metric-label">总评论</p>
+          <p class="metric-value">{{ formatInt(funnelSummary.totalComment) }}</p>
+        </div>
+        <div class="metric-item">
+          <p class="metric-label">点赞转化率（点赞/播放）</p>
+          <p class="metric-value">{{ toPercent(funnelSummary.likeRate) }}</p>
+        </div>
+        <div class="metric-item">
+          <p class="metric-label">评论转化率（评论/播放）</p>
+          <p class="metric-value">{{ toPercent(funnelSummary.commentRate) }}</p>
+        </div>
+        <div class="metric-item">
+          <p class="metric-label">评赞比（评论/点赞）</p>
+          <p class="metric-value">{{ toPercent(funnelSummary.commentLikeRate) }}</p>
+        </div>
+      </div>
       <div v-if="funnelStats.length" class="table-wrap top-gap">
         <table>
           <thead>
@@ -48,8 +74,9 @@
               <th>总播放</th>
               <th>总点赞</th>
               <th>总评论</th>
-              <th>点赞转化率</th>
-              <th>评论转化率</th>
+              <th>点赞转化率（点赞/播放）</th>
+              <th>评论转化率（评论/播放）</th>
+              <th>评赞比（评论/点赞）</th>
             </tr>
           </thead>
           <tbody>
@@ -61,6 +88,7 @@
               <td>{{ formatInt(row.totalComment) }}</td>
               <td>{{ toPercent(row.likeConversionRate) }}</td>
               <td>{{ toPercent(row.commentConversionRate) }}</td>
+              <td>{{ toPercent(commentByLike(row)) }}</td>
             </tr>
           </tbody>
         </table>
@@ -155,8 +183,46 @@ const hasAnyData = computed(
 
 const formatInt = (v) => Number(v ?? 0).toLocaleString("zh-CN");
 const toPercent = (v) => `${(Number(v ?? 0) * 100).toFixed(2)}%`;
+const toCompact = (v) => {
+  const n = Number(v ?? 0);
+  if (!Number.isFinite(n)) {
+    return "0";
+  }
+  if (Math.abs(n) >= 100000000) {
+    return `${(n / 100000000).toFixed(1)}亿`;
+  }
+  if (Math.abs(n) >= 10000) {
+    return `${(n / 10000).toFixed(1)}万`;
+  }
+  return Math.round(n).toLocaleString("zh-CN");
+};
 
 const normalizePlatform = (name) => toPlatformLabel(name);
+const commentByLike = (row) => {
+  const totalLike = Number(row?.totalLike ?? 0);
+  const totalComment = Number(row?.totalComment ?? 0);
+  if (totalLike <= 0) {
+    return 0;
+  }
+  return totalComment / totalLike;
+};
+
+const funnelSummary = computed(() => {
+  const totalPlay = funnelStats.value.reduce((sum, row) => sum + Number(row.totalPlay ?? 0), 0);
+  const totalLike = funnelStats.value.reduce((sum, row) => sum + Number(row.totalLike ?? 0), 0);
+  const totalComment = funnelStats.value.reduce((sum, row) => sum + Number(row.totalComment ?? 0), 0);
+  const likeRate = totalPlay > 0 ? totalLike / totalPlay : 0;
+  const commentRate = totalPlay > 0 ? totalComment / totalPlay : 0;
+  const commentLikeRate = totalLike > 0 ? totalComment / totalLike : 0;
+  return {
+    totalPlay,
+    totalLike,
+    totalComment,
+    likeRate,
+    commentRate,
+    commentLikeRate
+  };
+});
 
 const categoryOption = computed(() => ({
   tooltip: {
@@ -203,74 +269,37 @@ const categoryOption = computed(() => ({
   ]
 }));
 
-const funnelOption = computed(() => ({
-  tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
-  legend: { textStyle: { color: "#475569" } },
-  grid: { top: 32, left: 64, right: 18, bottom: 48 },
-  xAxis: {
-    type: "category",
-    data: funnelStats.value.map((row) => normalizePlatform(row.sourcePlatform)),
-    axisLabel: { color: "#4b5563" },
-    axisLine: { lineStyle: { color: "#d2dceb" } }
-  },
-  yAxis: [
-    {
-      type: "value",
-      name: "规模",
-      axisLabel: { color: "#4b5563" },
-      splitLine: { lineStyle: { color: "#e8eef7" } }
-    },
-    {
-      type: "value",
-      name: "转化率",
-      axisLabel: {
-        color: "#4b5563",
-        formatter: (value) => `${(value * 100).toFixed(1)}%`
-      }
-    }
-  ],
-  series: [
-    {
-      name: "总播放",
-      type: "bar",
-      data: funnelStats.value.map((row) => Number(row.totalPlay ?? 0)),
-      itemStyle: { color: "#1f93ff" }
-    },
-    {
-      name: "总点赞",
-      type: "bar",
-      data: funnelStats.value.map((row) => Number(row.totalLike ?? 0)),
-      itemStyle: { color: "#20b274" }
-    },
-    {
-      name: "总评论",
-      type: "bar",
-      data: funnelStats.value.map((row) => Number(row.totalComment ?? 0)),
-      itemStyle: { color: "#f59f0b" }
-    },
-    {
-      name: "点赞转化率",
-      type: "line",
-      yAxisIndex: 1,
-      smooth: true,
-      data: funnelStats.value.map((row) => Number(row.likeConversionRate ?? 0)),
-      lineStyle: { color: "#2563eb" }
-    },
-    {
-      name: "评论转化率",
-      type: "line",
-      yAxisIndex: 1,
-      smooth: true,
-      data: funnelStats.value.map((row) => Number(row.commentConversionRate ?? 0)),
-      lineStyle: { color: "#c2410c" }
-    }
-  ]
-}));
+const benchmarkOption = computed(() => {
+  const playValues = benchmarkStats.value.map((row) => Number(row.avgPlayPerVideo ?? 0));
+  const likeValues = benchmarkStats.value.map((row) => Number(row.avgLikePerVideo ?? 0));
+  const engagementValues = benchmarkStats.value.map((row) => Number(row.engagementPerThousandPlay ?? 0));
+  const singlePlatform = benchmarkStats.value.length <= 1;
 
-const benchmarkOption = computed(() => ({
-  tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
-  legend: { textStyle: { color: "#475569" } },
-  grid: { top: 36, left: 56, right: 26, bottom: 56 },
+  const maxPlay = Math.max(...playValues, 1);
+  const maxLike = Math.max(...likeValues, 1);
+  const playIndex = playValues.map((v) => (v / maxPlay) * 100);
+  const likeIndex = likeValues.map((v) => (v / maxLike) * 100);
+
+  return {
+  tooltip: {
+    trigger: "axis",
+    axisPointer: { type: "shadow" },
+    formatter(params) {
+      const index = params?.[0]?.dataIndex ?? 0;
+      const platform = benchmarkStats.value[index];
+      if (!platform) {
+        return "";
+      }
+      return [
+        `<b>${normalizePlatform(platform.sourcePlatform)}</b>`,
+        `单视频均播放：${toCompact(platform.avgPlayPerVideo)}（指数 ${playIndex[index].toFixed(1)}）`,
+        `单视频均点赞：${toCompact(platform.avgLikePerVideo)}（指数 ${likeIndex[index].toFixed(1)}）`,
+        `每千播放互动值：${Number(platform.engagementPerThousandPlay ?? 0).toFixed(2)}`
+      ].join("<br/>");
+    }
+  },
+  legend: { top: 2, textStyle: { color: "#475569" } },
+  grid: { top: 54, left: 96, right: 96, bottom: 64, containLabel: true },
   xAxis: {
     type: "category",
     data: benchmarkStats.value.map((row) => normalizePlatform(row.sourcePlatform)),
@@ -280,39 +309,72 @@ const benchmarkOption = computed(() => ({
   yAxis: [
     {
       type: "value",
-      name: "单视频均值",
-      axisLabel: { color: "#4b5563" },
+      name: "标准化指数",
+      min: 0,
+      max: 100,
+      axisLabel: {
+        color: "#4b5563",
+        formatter: (value) => `${value}%`
+      },
       splitLine: { lineStyle: { color: "#e8eef7" } }
     },
     {
       type: "value",
-      name: "每千播放互动",
-      axisLabel: { color: "#4b5563" }
+      name: "每千播放互动值",
+      axisLabel: { color: "#4b5563", formatter: (value) => Number(value).toFixed(1) }
     }
   ],
   series: [
     {
-      name: "单视频均播",
+      name: "单视频均播放指数",
       type: "bar",
-      data: benchmarkStats.value.map((row) => Number(row.avgPlayPerVideo ?? 0)),
-      itemStyle: { color: "#1f93ff" }
+      data: playIndex,
+      barMaxWidth: 30,
+      barCategoryGap: singlePlatform ? "62%" : "46%",
+      barGap: singlePlatform ? "55%" : "30%",
+      itemStyle: { color: "#1f93ff" },
+      label: {
+        show: !singlePlatform,
+        position: "top",
+        color: "#334155",
+        formatter: (p) => `${Number(p.value ?? 0).toFixed(1)}%`
+      }
     },
     {
-      name: "单视频均赞",
+      name: "单视频均点赞指数",
       type: "bar",
-      data: benchmarkStats.value.map((row) => Number(row.avgLikePerVideo ?? 0)),
-      itemStyle: { color: "#20b274" }
+      data: likeIndex,
+      barMaxWidth: 30,
+      barCategoryGap: singlePlatform ? "62%" : "46%",
+      barGap: singlePlatform ? "55%" : "30%",
+      itemStyle: { color: "#20b274" },
+      label: {
+        show: !singlePlatform,
+        position: "top",
+        color: "#334155",
+        formatter: (p) => `${Number(p.value ?? 0).toFixed(1)}%`
+      }
     },
     {
-      name: "每千播放互动",
+      name: "每千播放互动值",
       type: "line",
       yAxisIndex: 1,
       smooth: true,
-      data: benchmarkStats.value.map((row) => Number(row.engagementPerThousandPlay ?? 0)),
-      lineStyle: { color: "#7c3aed" }
+      data: engagementValues,
+      symbolSize: 8,
+      lineStyle: { color: "#7c3aed", width: 3 },
+      itemStyle: { color: "#7c3aed" },
+      label: {
+        show: true,
+        position: singlePlatform ? "right" : "top",
+        offset: singlePlatform ? [10, -2] : [0, -2],
+        color: "#5b21b6",
+        formatter: (p) => Number(p.value ?? 0).toFixed(2)
+      }
     }
   ]
-}));
+};
+});
 
 const benchmarkThreeItems = computed(() =>
   benchmarkStats.value.map((row) => ({
@@ -411,6 +473,16 @@ watch([selectedPlatform, refreshSignal], () => {
   margin: 10px 2px 0;
   color: #64748b;
   font-size: 13px;
+}
+
+.section-tip {
+  margin: 0 0 12px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.compact-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .top-gap {

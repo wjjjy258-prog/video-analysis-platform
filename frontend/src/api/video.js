@@ -1,6 +1,6 @@
 import http from "./http";
 
-// "all" means no platform filter is sent so backend returns cross-platform results.
+// 【说明】当平台为“全部”时不传平台筛选参数，后端返回全平台聚合结果。
 const buildPlatformParams = (platform) => {
   const normalized = String(platform ?? "").trim().toLowerCase();
   if (!normalized || normalized === "all") {
@@ -17,6 +17,21 @@ export const getOverview = async (platform = "all") => {
 export const getHomeDashboard = async (hotLimit = 5, platform = "all") => {
   const { data } = await http.get("/video/dashboard", {
     params: { hotLimit, ...buildPlatformParams(platform) }
+  });
+  return data;
+};
+
+export const getCreatorDashboard = async (platform = "all") => {
+  const { data } = await http.get("/video/creator/dashboard", {
+    params: buildPlatformParams(platform),
+    silentError: true
+  });
+  return data;
+};
+
+export const updateCreatorProfile = async (payload) => {
+  const { data } = await http.post("/video/creator/profile", payload || {}, {
+    silentError: true
   });
   return data;
 };
@@ -100,7 +115,7 @@ export const clearCrawlerData = async () => {
 };
 
 export const getImportRejects = async (limit = 50) => {
-  // Fetch rows rejected by quality gate with actionable fix suggestions.
+  // 【说明】获取被质量门禁拒绝的记录及可执行修复建议。
   const { data } = await http.get("/crawler/rejects", { params: { limit }, silentError: true });
   return data;
 };

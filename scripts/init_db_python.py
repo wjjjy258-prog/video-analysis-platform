@@ -67,7 +67,12 @@ def add_column_if_missing(cursor, table_name: str, column_name: str, definition:
 
 
 def pre_upgrade_schema(cursor) -> None:
-    # Ensure old databases can execute the latest init.sql inserts.
+    # 【说明】先补齐旧库缺失字段，确保可以执行最新版初始化脚本中的插入与升级语句。
+    add_column_if_missing(cursor, "app_user", "user_role", "VARCHAR(16) NOT NULL DEFAULT 'viewer' AFTER password_salt")
+    add_column_if_missing(cursor, "app_user", "creator_name", "VARCHAR(100) DEFAULT NULL AFTER user_role")
+    add_column_if_missing(cursor, "app_user", "creator_platform", "VARCHAR(32) NOT NULL DEFAULT 'unknown' AFTER creator_name")
+    add_column_if_missing(cursor, "app_user", "creator_focus_category", "VARCHAR(60) DEFAULT NULL AFTER creator_platform")
+
     add_column_if_missing(cursor, "video", "tenant_user_id", "BIGINT NOT NULL DEFAULT 1 AFTER id")
     add_column_if_missing(cursor, "user", "tenant_user_id", "BIGINT NOT NULL DEFAULT 1 AFTER user_id")
     add_column_if_missing(cursor, "comment", "tenant_user_id", "BIGINT NOT NULL DEFAULT 1 AFTER comment_id")
@@ -75,6 +80,18 @@ def pre_upgrade_schema(cursor) -> None:
     add_column_if_missing(cursor, "video_statistics", "tenant_user_id", "BIGINT NOT NULL DEFAULT 1 AFTER id")
     add_column_if_missing(cursor, "user_interest_result", "tenant_user_id", "BIGINT NOT NULL DEFAULT 1 AFTER id")
     add_column_if_missing(cursor, "import_job", "tenant_user_id", "BIGINT NOT NULL DEFAULT 1 AFTER id")
+
+    if table_exists(cursor, "app_user"):
+        if column_exists(cursor, "app_user", "user_role"):
+            cursor.execute(
+                "UPDATE app_user SET user_role = 'viewer' "
+                "WHERE user_role IS NULL OR TRIM(user_role) = ''"
+            )
+        if column_exists(cursor, "app_user", "creator_platform"):
+            cursor.execute(
+                "UPDATE app_user SET creator_platform = 'unknown' "
+                "WHERE creator_platform IS NULL OR TRIM(creator_platform) = ''"
+            )
 
     if table_exists(cursor, "video") and column_exists(cursor, "video", "tenant_user_id"):
         cursor.execute("UPDATE video SET tenant_user_id = 1 WHERE tenant_user_id IS NULL OR tenant_user_id <= 0")

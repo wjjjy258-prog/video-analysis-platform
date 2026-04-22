@@ -125,10 +125,10 @@ def fallback_demo_videos() -> list[dict[str, Any]]:
 
 def stable_numeric_id(text: str, namespace: str = "default") -> int:
     """
-    Build a stable BIGINT-safe positive integer from a text key.
+    根据文本键构建稳定且可落入 BIGINT 的正整数 ID。
     """
     digest = hashlib.sha1(f"{namespace}:{text}".encode("utf-8")).hexdigest()
-    value = int(digest[:15], 16)  # max around 1e18, fits signed BIGINT
+    value = int(digest[:15], 16)  # 【说明】最大约 1e18，可安全落在有符号 BIGINT 范围内。
     if value <= 0:
         return 1
     return value
